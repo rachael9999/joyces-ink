@@ -4,6 +4,7 @@ import 'package:sizer/sizer.dart';
 
 import '../core/app_export.dart';
 import './services/payment_service.dart';
+import './services/auth_service.dart';
 import './services/supabase_service.dart';
 
 void main() async {
@@ -44,7 +45,25 @@ void main() async {
   }
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  @override
+  void initState() {
+    super.initState();
+    // Handle Supabase password recovery deep link event
+    AuthService.instance.authStateChanges.listen((state) {
+      final eventString = state.event.toString().toLowerCase();
+      if (eventString.contains('passwordrecovery') || eventString.contains('recovery')) {
+        // Navigate to reset password screen
+        AppRoutes.navigatorKey.currentState?.pushNamed(AppRoutes.resetPasswordScreen);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Sizer(builder: (context, orientation, screenType) {
@@ -53,6 +72,7 @@ class MyApp extends StatelessWidget {
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
         themeMode: ThemeMode.light,
+        navigatorKey: AppRoutes.navigatorKey,
         // 🚨 CRITICAL: NEVER REMOVE OR MODIFY
         builder: (context, child) {
           return MediaQuery(

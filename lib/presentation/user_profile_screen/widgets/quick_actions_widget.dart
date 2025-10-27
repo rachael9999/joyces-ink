@@ -6,13 +6,11 @@ import '../../../core/app_export.dart';
 class QuickActionsWidget extends StatelessWidget {
   final VoidCallback onEditProfile;
   final VoidCallback onWritingGoals;
-  final VoidCallback onExportData;
 
   const QuickActionsWidget({
     Key? key,
     required this.onEditProfile,
     required this.onWritingGoals,
-    required this.onExportData,
   }) : super(key: key);
 
   @override
@@ -66,18 +64,7 @@ class QuickActionsWidget extends StatelessWidget {
               ),
             ],
           ),
-          SizedBox(height: 2.h),
-          SizedBox(
-            width: double.infinity,
-            child: _buildActionCard(
-              context,
-              'Export Data',
-              'Download your stories and entries',
-              'file_download',
-              AppTheme.lightTheme.colorScheme.primaryContainer,
-              onExportData,
-            ),
-          ),
+          // Removed Export Data action as requested
         ],
       ),
     );

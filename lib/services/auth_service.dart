@@ -356,6 +356,58 @@ class AuthService {
     }
   }
 
+  // Send password reset email
+  Future<void> sendPasswordResetEmail(String email) async {
+    try {
+      final trimmedEmail = email.trim();
+      if (trimmedEmail.isEmpty) {
+        throw Exception('Please enter your email address.');
+      }
+      // Basic email validation
+      if (!RegExp(r'^[\w\-.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(trimmedEmail)) {
+        throw Exception('Please enter a valid email address.');
+      }
+
+      // Use a deep link redirect so the app can handle the recovery in-app
+      const redirectUri = 'io.supabase.flutter://reset-callback';
+      await _client.auth.resetPasswordForEmail(
+        trimmedEmail,
+        redirectTo: redirectUri,
+      );
+    } on AuthException catch (error) {
+      String message;
+      switch (error.statusCode) {
+        case '400':
+          if (error.message.contains('Email not found') ||
+              error.message.contains('User not found')) {
+            message =
+                'We could not find an account with that email. Please check and try again.';
+          } else if (error.message.contains('Unable to validate email')) {
+            message = 'Please enter a valid email address.';
+          } else {
+            message = 'Could not send reset email. Please try again.';
+          }
+          break;
+        case '429':
+          message =
+              'Too many requests. Please wait a moment and try again.';
+          break;
+        default:
+          message = 'Password reset failed: ${error.message}';
+      }
+      throw Exception(message);
+    } catch (e) {
+      final s = e.toString();
+      if (s.contains('NetworkException') ||
+          s.contains('SocketException')) {
+        throw Exception(
+          'Network error. Please check your internet connection and try again.',
+        );
+      }
+      throw Exception('Could not send reset email. Please try again later.');
+    }
+  }
+
   // Delete account
   Future<void> deleteAccount() async {
     try {

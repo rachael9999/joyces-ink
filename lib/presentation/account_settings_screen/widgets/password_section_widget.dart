@@ -1,3 +1,4 @@
+import '../../../services/auth_service.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:sizer/sizer.dart';
@@ -72,9 +73,23 @@ class _PasswordSectionWidgetState extends State<PasswordSectionWidget> {
     });
   }
 
-  void _changePassword() {
-    if (_formKey.currentState!.validate()) {
-      // Password change logic here
+  Future<void> _changePassword() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final curr = _currentPasswordController.text.trim();
+    final next = _newPasswordController.text.trim();
+
+    try {
+      // Verify current password by re-authenticating
+      final email = AuthService.instance.currentUser?.email;
+      if (email == null || email.isEmpty) {
+        throw Exception('You are not signed in. Please log in again.');
+      }
+
+      await AuthService.instance.signIn(email: email, password: curr);
+      await AuthService.instance.updatePassword(next);
+
+      if (!mounted) return;
       setState(() {
         _showPasswordForm = false;
         _currentPasswordController.clear();
@@ -82,13 +97,23 @@ class _PasswordSectionWidgetState extends State<PasswordSectionWidget> {
         _confirmPasswordController.clear();
         _passwordStrength = 0.0;
       });
-
       widget.onChanged();
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Password changed successfully'),
           behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e.toString().replaceFirst('Exception: ', ''),
+          ),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Colors.red.shade600,
         ),
       );
     }

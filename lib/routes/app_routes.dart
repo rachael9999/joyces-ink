@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 
 import '../presentation/account_settings_screen/account_settings_screen.dart';
 import '../presentation/export_data_screen/export_data_screen.dart';
@@ -6,6 +7,8 @@ import '../presentation/help_support_screen/help_support_screen.dart';
 import '../presentation/journal_entry_creation/journal_entry_creation.dart';
 import '../presentation/journal_home_screen/journal_home_screen.dart';
 import '../presentation/login_screen/login_screen.dart';
+import '../presentation/login_screen/forgot_password_screen.dart';
+import '../presentation/login_screen/reset_password_screen.dart';
 import '../presentation/onboarding_flow/onboarding_flow.dart';
 import '../presentation/privacy_security_screen/privacy_security_screen.dart';
 import '../presentation/register_screen/register_screen.dart';
@@ -18,6 +21,7 @@ import '../presentation/user_profile_screen/user_profile_screen.dart';
 import '../presentation/writing_preferences_screen/writing_preferences_screen.dart';
 
 class AppRoutes {
+      static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
   static const String initialRoute = '/initialRoute';
 
   static const String splashScreen = '/splash_screen';
@@ -27,8 +31,10 @@ class AppRoutes {
   static const String onboardingFlow = '/onboarding_flow';
 
   static const String loginScreen = '/login_screen';
+  static const String forgotPasswordScreen = '/forgot_password_screen';
 
   static const String registerScreen = '/register_screen';
+      static const String resetPasswordScreen = '/reset_password_screen';
 
   static const String journalEntryCreation = '/journal_entry_creation';
 
@@ -59,6 +65,8 @@ class AppRoutes {
         journalHomeScreen: (context) => const JournalHomeScreen(),
         onboardingFlow: (context) => const OnboardingFlow(),
         loginScreen: (context) => const LoginScreen(),
+  forgotPasswordScreen: (context) => const ForgotPasswordScreen(),
+      resetPasswordScreen: (context) => const ResetPasswordScreen(),
         registerScreen: (context) => const RegisterScreen(),
         journalEntryCreation: (context) => const JournalEntryCreation(),
         storyGenerationScreen: (context) => const StoryGenerationScreen(),

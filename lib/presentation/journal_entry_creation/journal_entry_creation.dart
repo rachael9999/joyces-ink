@@ -246,6 +246,33 @@ class _JournalEntryCreationState extends State<JournalEntryCreation>
       return;
     }
 
+    // Require an emotion/mood selection before saving
+    if (_selectedMood.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              CustomIconWidget(
+                iconName: 'mood',
+                color: Colors.white,
+                size: 5.w,
+              ),
+              SizedBox(width: 2.w),
+              const Expanded(
+                child: Text(
+                  'Please select an emotion before saving',
+                ),
+              ),
+            ],
+          ),
+          duration: const Duration(seconds: 3),
+          backgroundColor: Colors.orange.shade700,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
     setState(() {
       _isAutoSaving = true;
     });

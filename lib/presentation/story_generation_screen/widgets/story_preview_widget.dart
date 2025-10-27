@@ -413,12 +413,7 @@ class _StoryPreviewWidgetState extends State<StoryPreviewWidget>
                             onTap: widget.onShare,
                             color: Colors.green,
                           ),
-                          _buildActionButton(
-                            icon: 'download',
-                            label: 'Export',
-                            onTap: widget.onExport,
-                            color: Colors.orange,
-                          ),
+
                           _buildActionButton(
                             icon: 'copy',
                             label: 'Copy',

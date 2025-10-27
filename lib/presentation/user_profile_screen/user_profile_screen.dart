@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:sizer/sizer.dart';
 
 import '../../core/app_export.dart';
+import '../../services/auth_service.dart';
+import '../../services/supabase_service.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import './widgets/profile_header_widget.dart';
 import './widgets/profile_stats_widget.dart';
 import './widgets/quick_actions_widget.dart';
@@ -26,20 +30,20 @@ class _UserProfileScreenState extends State<UserProfileScreen>
   bool _backupEnabled = true;
   bool _privacyMode = false;
 
-  // Mock user data
-  final Map<String, dynamic> _userData = {
-    'name': 'Sarah Johnson',
-    'email': 'sarah.johnson@email.com',
-    'memberSince': DateTime(2023, 6, 15),
+  // User data (loaded from Supabase)
+  Map<String, dynamic> _userData = {
+    'name': 'Loading…',
+    'email': '',
+    'memberSince': null,
     'avatar': null,
-    'bio': 'Creative Writer & Storyteller',
-    'writingStreak': 7,
-    'totalEntries': 24,
-    'storiesGenerated': 12,
-    'favoriteGenres': ['Fantasy', 'Romance', 'Adventure'],
-    'dailyGoal': 300, // words
-    'currentStreak': 7,
-    'longestStreak': 15,
+    'bio': null,
+    'writingStreak': 0,
+    'totalEntries': 0,
+    'storiesGenerated': 0,
+    'favoriteGenres': <String>[],
+    'dailyGoal': 300,
+    'currentStreak': 0,
+    'longestStreak': 0,
   };
 
   @override
@@ -47,6 +51,63 @@ class _UserProfileScreenState extends State<UserProfileScreen>
     super.initState();
     _tabController = TabController(length: 3, vsync: this, initialIndex: 2);
     _initializeAnimations();
+    _loadUser();
+  }
+  Future<void> _loadUser() async {
+    try {
+      final user = AuthService.instance.currentUser;
+      final profile = await AuthService.instance.getUserProfile() ?? {};
+
+      setState(() {
+        _userData['name'] = (profile['full_name'] ?? user?.email ?? 'User') as String;
+        _userData['email'] = user?.email ?? '';
+        _userData['avatar'] = profile['avatar_url'];
+        _userData['bio'] = profile['bio'];
+        // Optional: If your user profile table stores created_at
+        _userData['memberSince'] = profile['created_at'] != null
+            ? DateTime.tryParse(profile['created_at'])
+            : null;
+      });
+    } catch (e) {
+      // Keep defaults on failure
+    }
+  }
+
+  Future<void> _pickAndUploadAvatar() async {
+    try {
+      final picker = ImagePicker();
+      final file = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+      if (file == null) return;
+
+      final user = AuthService.instance.currentUser;
+      if (user == null) return;
+
+      final bytes = await file.readAsBytes();
+      final ext = file.name.split('.').last.toLowerCase();
+      final path = 'public/${user.id}.${ext.isEmpty ? 'jpg' : ext}';
+      final storage = SupabaseService.instance.client.storage.from('avatars');
+
+      // Attempt upload; overwrite any existing
+      await storage.uploadBinary(path, bytes, fileOptions: const FileOptions(upsert: true, contentType: 'image/jpeg'));
+      final publicUrl = storage.getPublicUrl(path);
+
+      await AuthService.instance.updateUserProfile(avatarUrl: publicUrl);
+
+      setState(() {
+        _userData['avatar'] = publicUrl;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Profile photo updated')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to update photo: ${e.toString().replaceFirst('Exception: ', '')}')),
+      );
+    }
   }
 
   @override
@@ -89,20 +150,6 @@ class _UserProfileScreenState extends State<UserProfileScreen>
     showDialog(
       context: context,
       builder: (context) => _buildWritingGoalsDialog(),
-    );
-  }
-
-  void _exportData() {
-    showDialog(
-      context: context,
-      builder: (context) => _buildExportDataDialog(),
-    );
-  }
-
-  void _deleteAccount() {
-    showDialog(
-      context: context,
-      builder: (context) => _buildDeleteAccountDialog(),
     );
   }
 
@@ -154,7 +201,28 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                     ),
                   ),
                   GestureDetector(
-                    onTap: _showSettingsMenu,
+                    onTap: () async {
+                      try {
+                        await AuthService.instance.signOut();
+                        if (!mounted) return;
+                        Navigator.pushNamedAndRemoveUntil(
+                          context,
+                          AppRoutes.loginScreen,
+                          (route) => false,
+                        );
+                      } catch (e) {
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Sign out failed: ' +
+                                  e.toString().replaceFirst('Exception: ', ''),
+                            ),
+                            backgroundColor: Colors.red.shade600,
+                          ),
+                        );
+                      }
+                    },
                     child: Container(
                       padding: EdgeInsets.all(2.w),
                       decoration: BoxDecoration(
@@ -162,8 +230,8 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: CustomIconWidget(
-                        iconName: 'settings',
-                        color: AppTheme.lightTheme.colorScheme.onSurface,
+                        iconName: 'logout',
+                        color: AppTheme.lightTheme.colorScheme.error,
                         size: 6.w,
                       ),
                     ),
@@ -212,7 +280,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                           // Profile Header
                           ProfileHeaderWidget(
                             userData: _userData,
-                            onAvatarTap: _navigateToEditProfile,
+                            onAvatarTap: _pickAndUploadAvatar,
                           ),
 
                           SizedBox(height: 3.h),
@@ -226,7 +294,6 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                           QuickActionsWidget(
                             onEditProfile: _navigateToEditProfile,
                             onWritingGoals: _navigateToWritingGoals,
-                            onExportData: _exportData,
                           ),
 
                           SizedBox(height: 3.h),
@@ -236,9 +303,9 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                             title: 'Account',
                             children: [
                               _buildSettingsTile(
-                                'Email',
-                                _userData['email'],
-                                'email',
+                                'Password',
+                                '••••••••',
+                                'lock',
                                 () {},
                               ),
                               _buildSettingsTile(
@@ -342,56 +409,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
 
                           SizedBox(height: 3.h),
 
-                          // Danger Zone
-                          Container(
-                            width: double.infinity,
-                            padding: EdgeInsets.all(4.w),
-                            decoration: BoxDecoration(
-                              color: AppTheme.lightTheme.colorScheme.error
-                                  .withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: AppTheme.lightTheme.colorScheme.error
-                                    .withValues(alpha: 0.3),
-                                width: 1,
-                              ),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Danger Zone',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleMedium
-                                      ?.copyWith(
-                                        color: AppTheme
-                                            .lightTheme.colorScheme.error,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                ),
-                                SizedBox(height: 2.h),
-                                OutlinedButton.icon(
-                                  onPressed: _deleteAccount,
-                                  icon: CustomIconWidget(
-                                    iconName: 'delete_forever',
-                                    color:
-                                        AppTheme.lightTheme.colorScheme.error,
-                                    size: 5.w,
-                                  ),
-                                  label: const Text('Delete Account'),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor:
-                                        AppTheme.lightTheme.colorScheme.error,
-                                    side: BorderSide(
-                                      color:
-                                          AppTheme.lightTheme.colorScheme.error,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
+                          // Removed Danger Zone (Delete Account) as requested
 
                           SizedBox(height: 10.h),
                         ],
@@ -580,67 +598,9 @@ class _UserProfileScreenState extends State<UserProfileScreen>
     );
   }
 
-  Widget _buildExportDataDialog() {
-    return AlertDialog(
-      title: const Text('Export Data'),
-      content: const Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Choose export format:'),
-          ListTile(
-            title: Text('JSON'),
-            subtitle: Text('Machine readable format'),
-          ),
-          ListTile(
-            title: Text('PDF'),
-            subtitle: Text('Formatted document'),
-          ),
-          ListTile(
-            title: Text('ZIP Archive'),
-            subtitle: Text('All files and media'),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Export'),
-        ),
-      ],
-    );
-  }
+  // Removed export dialog as requested
 
-  Widget _buildDeleteAccountDialog() {
-    return AlertDialog(
-      title: Text(
-        'Delete Account',
-        style: TextStyle(
-          color: AppTheme.lightTheme.colorScheme.error,
-        ),
-      ),
-      content: const Text(
-        'Are you sure you want to delete your account? This action cannot be undone and all your data will be permanently lost.',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: () => Navigator.pop(context),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppTheme.lightTheme.colorScheme.error,
-          ),
-          child: const Text('Delete'),
-        ),
-      ],
-    );
-  }
+  
 
   Widget _buildSubscriptionModal() {
     return Container(
@@ -679,46 +639,5 @@ class _UserProfileScreenState extends State<UserProfileScreen>
     );
   }
 
-  void _showSettingsMenu() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (BuildContext context) {
-        return Container(
-          padding: EdgeInsets.all(4.w),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 12.w,
-                height: 0.5.h,
-                decoration: BoxDecoration(
-                  color: AppTheme.lightTheme.dividerColor,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              SizedBox(height: 3.h),
-              ListTile(
-                leading: CustomIconWidget(
-                  iconName: 'logout',
-                  color: AppTheme.lightTheme.colorScheme.error,
-                  size: 6.w,
-                ),
-                title: Text(
-                  'Sign Out',
-                  style: TextStyle(
-                    color: AppTheme.lightTheme.colorScheme.error,
-                  ),
-                ),
-                onTap: () => Navigator.pop(context),
-              ),
-              SizedBox(height: 2.h),
-            ],
-          ),
-        );
-      },
-    );
-  }
+  
 }

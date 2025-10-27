@@ -9,7 +9,6 @@ import '../user_profile_screen/widgets/quick_actions_widget.dart';
 import '../user_profile_screen/widgets/settings_section_widget.dart';
 import '../user_profile_screen/widgets/theme_selector_widget.dart';
 import './widgets/empty_state_widget.dart';
-import './widgets/export_progress_dialog.dart';
 import './widgets/greeting_header_widget.dart';
 import './widgets/journal_entry_card_widget.dart';
 import './widgets/new_entry_card_widget.dart';
@@ -114,7 +113,9 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
     // Listen to auth state changes
     AuthService.instance.authStateChanges.listen((data) {
       if (data.event.toString() == 'signedOut') {
-        Navigator.pushReplacementNamed(context, AppRoutes.loginScreen);
+        if (mounted) {
+          Navigator.pushReplacementNamed(context, AppRoutes.loginScreen);
+        }
       }
     });
   }
@@ -132,30 +133,6 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
     super.dispose();
   }
 
-  void _initializeStoryData() {
-    setState(() {
-      _storyTitle = _currentStory['title'] as String;
-      _storyContent = _currentStory['content'] as String;
-      _genre = _currentStory['genre'] as String;
-      _creationDate = _currentStory['creationDate'] as DateTime;
-      _wordCount = _currentStory['wordCount'] as int;
-      _readingTimeMinutes = _currentStory['readingTimeMinutes'] as int;
-      _rating = _currentStory['rating'] as int;
-      _isFavorite = _currentStory['isFavorite'] as bool;
-    });
-  }
-
-  void _updateReadingProgress() {
-    if (_scrollController.hasClients) {
-      final maxScroll = _scrollController.position.maxScrollExtent;
-      final currentScroll = _scrollController.position.pixels;
-      setState(() {
-        _readingProgress =
-            maxScroll > 0 ? (currentScroll / maxScroll).clamp(0.0, 1.0) : 0.0;
-      });
-    }
-  }
-
   void _initializeAnimations() {
     _profileAnimationController = AnimationController(
       duration: const Duration(milliseconds: 800),
@@ -171,8 +148,21 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
 
     // Start animation after build
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _profileAnimationController.forward();
+      if (mounted) {
+        _profileAnimationController.forward();
+      }
     });
+  }
+
+  void _updateReadingProgress() {
+    if (_scrollController.hasClients) {
+      final maxScroll = _scrollController.position.maxScrollExtent;
+      final currentScroll = _scrollController.position.pixels;
+      setState(() {
+        _readingProgress =
+            maxScroll > 0 ? (currentScroll / maxScroll).clamp(0.0, 1.0) : 0.0;
+      });
+    }
   }
 
   void _filterEntries(String query) {
@@ -192,9 +182,7 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
 
   Future<void> _loadUserData() async {
     if (!mounted) return;
-    
     setState(() => _isLoadingData = true);
-    
     try {
       // Load user profile first
       _userData = await AuthService.instance.getUserProfile();
@@ -209,12 +197,12 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
           });
         }
       } catch (e) {
-        print('Error loading journal entries: $e');
+        debugPrint('Error loading journal entries: $e');
         if (mounted) {
           _journalEntries = [];
           _filteredEntries = [];
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to load journal entries. Please try again.')),
+            const SnackBar(content: Text('Failed to load journal entries. Please try again.')),
           );
         }
       }
@@ -222,14 +210,15 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
       // Load other data
       try {
         _generatedStories = await StoryService.instance.getGeneratedStories();
-      _thoughts = await SparkleService.instance.getSparkles();
-      _thoughtsStats = await SparkleService.instance.getSparkleStatistics();        if (mounted) {
+        _thoughts = await SparkleService.instance.getSparkles();
+        _thoughtsStats = await SparkleService.instance.getSparkleStatistics();
+        if (mounted) {
           setState(() {
             _filteredThoughts = List.from(_thoughts);
           });
         }
       } catch (e) {
-        print('Error loading additional data: $e');
+        debugPrint('Error loading additional data: $e');
         // Non-critical data, continue without showing error
       }
 
@@ -237,11 +226,11 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
         setState(() => _isLoadingData = false);
       }
     } catch (error) {
-      print('Error in _loadUserData: $error');
+      debugPrint('Error in _loadUserData: $error');
       if (mounted) {
         setState(() => _isLoadingData = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load data. Please check your connection.')),
+          const SnackBar(content: Text('Failed to load data. Please check your connection.')),
         );
       }
     }
@@ -698,218 +687,7 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
     );
   }
 
-  void _showAdvancedExportDialog() {
-    String selectedFormat = 'PDF';
-    String selectedDateRange = 'All Time';
-    bool includeImages = true;
-    bool includeMetadata = true;
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Export Data'),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Export Format',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w600),
-                ),
-                SizedBox(height: 1.h),
-                DropdownButtonFormField<String>(
-                  initialValue: selectedFormat,
-                  decoration: InputDecoration(
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 3.w,
-                      vertical: 1.h,
-                    ),
-                  ),
-                  items: ['PDF', 'JSON', 'CSV', 'ZIP Archive'].map((
-                    format,
-                  ) {
-                    return DropdownMenuItem(
-                      value: format,
-                      child: Row(
-                        children: [
-                          CustomIconWidget(
-                            iconName: _getFormatIcon(format),
-                            color: AppTheme.lightTheme.colorScheme.primary,
-                            size: 4.w,
-                          ),
-                          SizedBox(width: 2.w),
-                          Text(format),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (value) {
-                    setDialogState(() {
-                      selectedFormat = value!;
-                    });
-                  },
-                ),
-                SizedBox(height: 2.h),
-                Text(
-                  'Date Range',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w600),
-                ),
-                SizedBox(height: 1.h),
-                DropdownButtonFormField<String>(
-                  initialValue: selectedDateRange,
-                  decoration: InputDecoration(
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 3.w,
-                      vertical: 1.h,
-                    ),
-                  ),
-                  items: [
-                    'All Time',
-                    'Last Month',
-                    'Last 3 Months',
-                    'Last Year',
-                    'Custom Range',
-                  ].map((range) {
-                    return DropdownMenuItem(
-                      value: range,
-                      child: Text(range),
-                    );
-                  }).toList(),
-                  onChanged: (value) {
-                    setDialogState(() {
-                      selectedDateRange = value!;
-                    });
-                  },
-                ),
-                SizedBox(height: 2.h),
-                Text(
-                  'Export Options',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w600),
-                ),
-                CheckboxListTile(
-                  title: const Text('Include Images'),
-                  subtitle: const Text('Export attached photos'),
-                  value: includeImages,
-                  onChanged: (value) {
-                    setDialogState(() {
-                      includeImages = value!;
-                    });
-                  },
-                  contentPadding: EdgeInsets.zero,
-                ),
-                CheckboxListTile(
-                  title: const Text('Include Metadata'),
-                  subtitle: const Text(
-                    'Export timestamps and mood data',
-                  ),
-                  value: includeMetadata,
-                  onChanged: (value) {
-                    setDialogState(() {
-                      includeMetadata = value!;
-                    });
-                  },
-                  contentPadding: EdgeInsets.zero,
-                ),
-                SizedBox(height: 2.h),
-                Container(
-                  padding: EdgeInsets.all(3.w),
-                  decoration: BoxDecoration(
-                    color: AppTheme.lightTheme.colorScheme.primary
-                        .withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    children: [
-                      CustomIconWidget(
-                        iconName: 'info',
-                        color: AppTheme.lightTheme.colorScheme.primary,
-                        size: 4.w,
-                      ),
-                      SizedBox(width: 2.w),
-                      Expanded(
-                        child: Text(
-                          'Export includes ${_userData?['total_entries'] ?? 0} entries (approx. 2.4 MB)',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton.icon(
-              onPressed: () {
-                Navigator.pop(context);
-                _startExport(
-                  selectedFormat,
-                  selectedDateRange,
-                  includeImages,
-                  includeMetadata,
-                );
-              },
-              icon: CustomIconWidget(
-                iconName: 'download',
-                color: Colors.white,
-                size: 4.w,
-              ),
-              label: const Text('Export'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _getFormatIcon(String format) {
-    switch (format) {
-      case 'PDF':
-        return 'picture_as_pdf';
-      case 'JSON':
-        return 'code';
-      case 'CSV':
-        return 'table_chart';
-      case 'ZIP Archive':
-        return 'folder_zip';
-      default:
-        return 'file_download';
-    }
-  }
-
-  void _startExport(
-    String format,
-    String dateRange,
-    bool includeImages,
-    bool includeMetadata,
-  ) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const ExportProgressDialog(),
-    );
-  }
+  // Removed legacy Export UI and logic
 
   void _showEnhancedSubscriptionModal() {
     showModalBottomSheet(
@@ -2925,7 +2703,6 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
                   QuickActionsWidget(
                     onEditProfile: _navigateToEditProfile,
                     onWritingGoals: _navigateToWritingGoals,
-                    onExportData: _showAdvancedExportDialog,
                   ),
 
                   SizedBox(height: 3.h),
@@ -3121,9 +2898,7 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
     );
   }
 
-  void _exportData() {
-    _showAdvancedExportDialog();
-  }
+  // Removed legacy export handler
 
   void _deleteAccount() {
     showDialog(
@@ -3303,37 +3078,7 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
     );
   }
 
-  Widget _buildExportDataDialog() {
-    return AlertDialog(
-      title: const Text('Export Data'),
-      content: const Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Choose export format:'),
-          ListTile(
-            title: Text('JSON'),
-            subtitle: Text('Machine readable format'),
-          ),
-          ListTile(title: Text('PDF'), subtitle: Text('Formatted document')),
-          ListTile(
-            title: Text('ZIP Archive'),
-            subtitle: Text('All files and media'),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Export'),
-        ),
-      ],
-    );
-  }
+  // Removed legacy export dialog
 
   Widget _buildDeleteAccountDialog() {
     return AlertDialog(

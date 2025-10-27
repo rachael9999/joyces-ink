@@ -181,10 +181,7 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   void _navigateToForgotPassword() {
-    // Navigate to forgot password screen
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Forgot password feature coming soon')),
-    );
+    Navigator.pushNamed(context, AppRoutes.forgotPasswordScreen);
   }
 
   @override
