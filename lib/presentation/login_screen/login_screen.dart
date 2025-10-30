@@ -356,8 +356,53 @@ class _LoginScreenState extends State<LoginScreen>
 
                       // Social Login Section
                       SocialLoginWidget(
-                        onGoogleLogin: () {},
-                        onAppleLogin: () {},
+                        onGoogleLogin: () async {
+                          if (_isLoading) return;
+                          setState(() => _isLoading = true);
+                          try {
+                            await AuthService.instance.signInWithGoogle();
+                            // On web this may redirect; on success navigate if returned
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Google sign-in initiated')),
+                            );
+                            await Future.delayed(const Duration(milliseconds: 300));
+                            if (mounted) {
+                              Navigator.pushReplacementNamed(
+                                  context, AppRoutes.journalHomeScreen);
+                            }
+                          } catch (e) {
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Google sign-in failed: ${e.toString()}')),
+                            );
+                          } finally {
+                            if (mounted) setState(() => _isLoading = false);
+                          }
+                        },
+                        onAppleLogin: () async {
+                          if (_isLoading) return;
+                          setState(() => _isLoading = true);
+                          try {
+                            await AuthService.instance.signInWithApple();
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Apple sign-in initiated')),
+                            );
+                            await Future.delayed(const Duration(milliseconds: 300));
+                            if (mounted) {
+                              Navigator.pushReplacementNamed(
+                                  context, AppRoutes.journalHomeScreen);
+                            }
+                          } catch (e) {
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Apple sign-in failed: ${e.toString()}')),
+                            );
+                          } finally {
+                            if (mounted) setState(() => _isLoading = false);
+                          }
+                        },
                       ),
 
                       SizedBox(height: 6.h),

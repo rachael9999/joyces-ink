@@ -60,6 +60,23 @@ class AuthService {
     required String fullName,
   }) async {
     try {
+      // Check if email already exists in user_profiles table to give fast feedback.
+      // Note: Some setups may not store email in user_profiles; this is a best-effort check.
+      try {
+        final existing = await _client
+            .from('user_profiles')
+            .select('id')
+            .eq('email', email)
+            .maybeSingle();
+
+        if (existing != null && existing is Map && existing['id'] != null) {
+          throw Exception('An account with this email already exists.');
+        }
+      } catch (_) {
+        // Non-fatal: if the user_profiles table doesn't exist or query fails,
+        // we'll fall back to allowing the signUp call to surface an error.
+      }
+
       final response = await _client.auth.signUp(
         email: email,
         password: password,
@@ -119,6 +136,26 @@ class AuthService {
       } else {
         throw Exception('Registration failed. Please try again later.');
       }
+    }
+  }
+
+  // Sign in with Google (OAuth)
+  Future<void> signInWithGoogle({String? redirectTo}) async {
+    try {
+      // Use supabase_flutter's OAuth flow. On web this will redirect.
+  // Use dynamic call to avoid type mismatches across supabase_flutter versions
+  await (_client.auth as dynamic).signInWithOAuth('google', redirectTo: redirectTo);
+    } catch (error) {
+      throw Exception('Google sign-in failed: $error');
+    }
+  }
+
+  // Sign in with Apple (OAuth)
+  Future<void> signInWithApple({String? redirectTo}) async {
+    try {
+  await (_client.auth as dynamic).signInWithOAuth('apple', redirectTo: redirectTo);
+    } catch (error) {
+      throw Exception('Apple sign-in failed: $error');
     }
   }
 

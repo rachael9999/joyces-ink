@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:sizer/sizer.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/app_export.dart';
 import '../user_profile_screen/widgets/profile_header_widget.dart';
@@ -112,7 +113,8 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
 
     // Listen to auth state changes
     AuthService.instance.authStateChanges.listen((data) {
-      if (data.event.toString() == 'signedOut') {
+      // Ensure we respond specifically to the signedOut event
+      if (data.event == AuthChangeEvent.signedOut) {
         if (mounted) {
           Navigator.pushReplacementNamed(context, AppRoutes.loginScreen);
         }
@@ -332,6 +334,56 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
                 ),
                 title: const Text('Help & Support'),
                 onTap: () => Navigator.pop(context),
+              ),
+              SizedBox(height: 1.h),
+              const Divider(height: 1),
+              SizedBox(height: 1.h),
+              // Sign Out action
+              ListTile(
+                leading: CustomIconWidget(
+                  iconName: 'logout',
+                  color: AppTheme.lightTheme.colorScheme.error,
+                  size: 6.w,
+                ),
+                title: Text(
+                  'Sign Out',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: AppTheme.lightTheme.colorScheme.error,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                onTap: () async {
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Sign Out'),
+                      content: const Text(
+                        'Are you sure you want to sign out?',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(ctx).pop(false),
+                          child: const Text('Cancel'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(ctx).pop(true),
+                          child: Text(
+                            'Sign Out',
+                            style: TextStyle(
+                              color: AppTheme.lightTheme.colorScheme.error,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+
+                  if (confirm == true) {
+                    Navigator.of(context).pop(); // Close bottom sheet
+                    _handleLogout();
+                  }
+                },
               ),
               SizedBox(height: 2.h),
             ],
