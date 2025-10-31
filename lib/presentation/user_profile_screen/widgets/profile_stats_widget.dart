@@ -78,8 +78,8 @@ class ProfileStatsWidget extends StatelessWidget {
               Expanded(
                 child: _buildStatCard(
                   context,
-                  'Favorite Genres',
-                  _formatGenres(userData['favoriteGenres']),
+                  'Favorite Genre',
+                  _topGenre(userData['favoriteGenres']),
                   'favorite',
                   AppTheme.lightTheme.colorScheme.primaryContainer,
                 ),
@@ -121,7 +121,7 @@ class ProfileStatsWidget extends StatelessWidget {
                 ),
                 SizedBox(height: 2.h),
                 LinearProgressIndicator(
-                  value: 0.7, // Mock progress
+                  value: (userData['dailyProgressRatio'] ?? 0.0).toDouble(),
                   backgroundColor: AppTheme.lightTheme.colorScheme.primary
                       .withValues(alpha: 0.2),
                   valueColor: AlwaysStoppedAnimation<Color>(
@@ -130,7 +130,7 @@ class ProfileStatsWidget extends StatelessWidget {
                 ),
                 SizedBox(height: 1.h),
                 Text(
-                  '210 / ${userData['dailyGoal'] ?? 300} words today',
+                  '${userData['dailyProgressWords'] ?? 0} / ${userData['dailyGoal'] ?? 300} words today',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppTheme.lightTheme.colorScheme.primary
                             .withValues(alpha: 0.8),
@@ -197,9 +197,8 @@ class ProfileStatsWidget extends StatelessWidget {
     );
   }
 
-  String _formatGenres(List<dynamic>? genres) {
-    if (genres == null || genres.isEmpty) return '0';
-    if (genres.length == 1) return genres.first;
-    return '${genres.length} genres';
+  String _topGenre(List<dynamic>? genres) {
+    if (genres == null || genres.isEmpty) return 'Unknown';
+    return genres.first.toString();
   }
 }

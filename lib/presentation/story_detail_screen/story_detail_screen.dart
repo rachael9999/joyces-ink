@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:fluttertoast/fluttertoast.dart';
-import 'package:share_plus/share_plus.dart';
+// share_plus no longer used directly; sharing handled in share screen
 import 'package:sizer/sizer.dart';
 
 import '../../core/app_export.dart';
@@ -10,6 +10,7 @@ import './widgets/story_action_bar_widget.dart';
 import './widgets/story_content_widget.dart';
 import './widgets/story_header_widget.dart';
 import './widgets/story_metadata_widget.dart';
+import '../../services/story_service.dart';
 
 class StoryDetailScreen extends StatefulWidget {
   const StoryDetailScreen({Key? key}) : super(key: key);
@@ -139,7 +140,8 @@ As dawn approached and the garden began to fade with the morning light, Sarah un
       _creationDate = _currentStory['creationDate'] as DateTime;
       _wordCount = _currentStory['wordCount'] as int;
       _readingTimeMinutes = _currentStory['readingTimeMinutes'] as int;
-      _rating = _currentStory['rating'] as int;
+      // Do not default to a pre-filled rating; start at 0 until user sets it
+      _rating = 0;
       _isFavorite = _currentStory['isFavorite'] as bool;
     });
   }
@@ -214,22 +216,7 @@ As dawn approached and the garden began to fade with the morning light, Sarah un
                   _shareStory();
                 },
               ),
-              _buildMenuOption(
-                icon: 'file_download',
-                title: 'Export as PDF',
-                onTap: () {
-                  Navigator.pop(context);
-                  _exportStory('pdf');
-                },
-              ),
-              _buildMenuOption(
-                icon: 'text_snippet',
-                title: 'Export as Text',
-                onTap: () {
-                  Navigator.pop(context);
-                  _exportStory('txt');
-                },
-              ),
+              // Export options removed per requirements
               _buildMenuOption(
                 icon: 'delete',
                 title: 'Delete Story',
@@ -274,28 +261,19 @@ As dawn approached and the garden began to fade with the morning light, Sarah un
   }
 
   void _shareStory() {
-    Share.share(
-      'Check out this amazing story: "$_storyTitle"\n\n$_storyContent\n\nGenerated with StoryWeaver',
-      subject: _storyTitle,
+    Navigator.pushNamed(
+      context,
+      AppRoutes.storyShareScreen,
+      arguments: {
+        'title': _storyTitle,
+        'content': _storyContent,
+        'genre': _genre,
+        'storyId': _currentStory['id']?.toString(),
+      },
     );
   }
 
-  void _exportStory(String format) {
-    Fluttertoast.showToast(
-      msg: "Exporting story as ${format.toUpperCase()}...",
-      toastLength: Toast.LENGTH_SHORT,
-      gravity: ToastGravity.BOTTOM,
-    );
-
-    // Simulate export process
-    Future.delayed(const Duration(seconds: 2), () {
-      Fluttertoast.showToast(
-        msg: "Story exported successfully",
-        toastLength: Toast.LENGTH_SHORT,
-        gravity: ToastGravity.BOTTOM,
-      );
-    });
-  }
+  // Export functionality removed per requirements
 
   void _deleteStory() {
     showDialog(
@@ -318,14 +296,25 @@ As dawn approached and the garden began to fade with the morning light, Sarah un
             ),
           ),
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
-              Navigator.pop(context); // Return to previous screen
-              Fluttertoast.showToast(
-                msg: "Story deleted",
-                toastLength: Toast.LENGTH_SHORT,
-                gravity: ToastGravity.BOTTOM,
-              );
+              // Attempt real deletion if we have a UUID ID
+              try {
+                final id = _currentStory['id']?.toString();
+                final uuidPattern = RegExp(
+                    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$');
+                if (id != null && uuidPattern.hasMatch(id)) {
+                  await StoryService.instance.deleteGeneratedStory(id);
+                }
+              } catch (_) {}
+              if (mounted) {
+                Navigator.pop(context); // Return to previous screen
+                Fluttertoast.showToast(
+                  msg: "Story deleted",
+                  toastLength: Toast.LENGTH_SHORT,
+                  gravity: ToastGravity.BOTTOM,
+                );
+              }
             },
             style: TextButton.styleFrom(
               foregroundColor: Colors.red,
@@ -354,7 +343,7 @@ As dawn approached and the garden began to fade with the morning light, Sarah un
     );
   }
 
-  void _updateRating(int rating) {
+  Future<void> _updateRating(int rating) async {
     setState(() {
       _rating = rating;
     });
@@ -364,6 +353,21 @@ As dawn approached and the garden began to fade with the morning light, Sarah un
       toastLength: Toast.LENGTH_SHORT,
       gravity: ToastGravity.BOTTOM,
     );
+
+    // Persist rating if a real story ID is available (UUID expected)
+    try {
+      final id = _currentStory['id']?.toString();
+    final uuidPattern = RegExp(
+      r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$');
+      if (id != null && uuidPattern.hasMatch(id)) {
+        await StoryService.instance.updateGeneratedStory(
+          storyId: id,
+          rating: _rating,
+        );
+      }
+    } catch (_) {
+      // Best-effort; ignore failures silently for mock data
+    }
   }
 
   void _createNewVersion() {

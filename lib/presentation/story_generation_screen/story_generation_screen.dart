@@ -7,6 +7,7 @@ import '../../core/app_export.dart';
 import '../../services/gemini_service.dart';
 import '../../services/journal_service.dart';
 import '../../services/story_service.dart';
+// import '../../services/share_service.dart'; // No longer auto-creating share cards on save
 import './widgets/advanced_options_widget.dart';
 import './widgets/genre_selection_widget.dart';
 import './widgets/journal_entry_preview_widget.dart';
@@ -32,10 +33,7 @@ class _StoryGenerationScreenState extends State<StoryGenerationScreen>
   bool _showProgress = false;
   bool _showStoryPreview = false;
 
-  // Generation progress
-  double _progress = 0.0;
-  String _currentStep = '';
-  int _estimatedTimeRemaining = 0;
+  // Generation progress (removed unused fields)
 
   // User selections
   String? _selectedGenre;
@@ -161,7 +159,7 @@ class _StoryGenerationScreenState extends State<StoryGenerationScreen>
       _isGenerating = true;
       _showProgress = true;
       _showStoryPreview = false;
-      _progress = 0.0;
+  // reset internal progress in manager only
     });
 
     HapticFeedback.mediumImpact();
@@ -342,12 +340,14 @@ class _StoryGenerationScreenState extends State<StoryGenerationScreen>
     if (_generatedStory == null) return;
 
     try {
-      await StoryService.instance.createGeneratedStory(
+      final saved = await StoryService.instance.createGeneratedStory(
         journalEntryId: _selectedJournalEntry?['id']?.toString(),
         title: _generatedStory!['title'],
         content: _generatedStory!['content'],
         genre: _generatedStory!['genre'],
       );
+
+      // Do not auto-create share card or assets on save
 
       Fluttertoast.showToast(
         msg: "Story saved to your library! 📚",
@@ -357,8 +357,19 @@ class _StoryGenerationScreenState extends State<StoryGenerationScreen>
         textColor: AppTheme.onPrimaryLight,
       );
 
-  // Navigate to story library
-  Navigator.pushNamed(context, AppRoutes.storyLibraryScreen);
+      // Open Share screen pre-populated
+      if (mounted) {
+        Navigator.pushNamed(
+          context,
+          AppRoutes.storyShareScreen,
+          arguments: {
+            'title': saved['title'] ?? _generatedStory!['title'],
+            'content': saved['content'] ?? _generatedStory!['content'],
+            'genre': saved['genre'] ?? _generatedStory!['genre'],
+            'storyId': saved['id'].toString(),
+          },
+        );
+      }
     } catch (error) {
       // Surface a concise error to help diagnose (enum/UUID/RLS issues)
       final msg = error.toString();
@@ -368,13 +379,17 @@ class _StoryGenerationScreenState extends State<StoryGenerationScreen>
   }
 
   void _onShareStory() {
-    if (_generatedStory != null) {
-      Fluttertoast.showToast(
-        msg: "Sharing options opened! 📤",
-        toastLength: Toast.LENGTH_SHORT,
-        gravity: ToastGravity.BOTTOM,
-      );
-    }
+    if (_generatedStory == null) return;
+    final story = _generatedStory!;
+    Navigator.pushNamed(
+      context,
+      AppRoutes.storyShareScreen,
+      arguments: {
+        'title': story['title'] ?? '',
+        'content': story['content'] ?? '',
+        'genre': story['genre'] ?? '',
+      },
+    );
   }
 
   void _onExportStory() {
@@ -392,7 +407,7 @@ class _StoryGenerationScreenState extends State<StoryGenerationScreen>
     setState(() {
       _isGenerating = false;
       _showProgress = false;
-      _progress = 0.0;
+  // reset internal progress in manager only
     });
   }
 

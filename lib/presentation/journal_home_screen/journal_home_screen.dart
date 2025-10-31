@@ -224,6 +224,85 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
         // Non-critical data, continue without showing error
       }
 
+      // Compute and normalize profile fields for Profile widgets
+      try {
+        final supaUser = AuthService.instance.currentUser;
+        final raw = _userData ?? {};
+        final now = DateTime.now();
+
+        // Basic identity
+        final fullName = (raw['full_name'] ?? '').toString().trim();
+        final email = (raw['email'] ?? supaUser?.email ?? '').toString();
+        final fallbackName = (email.contains('@') ? email.split('@').first : 'User').trim();
+        final displayName = fullName.isNotEmpty ? fullName : fallbackName;
+
+        // Member since (prefer profile.created_at, else auth user createdAt if available)
+        DateTime? memberSince;
+        try {
+          final createdAt = raw['created_at']?.toString();
+          if (createdAt != null && createdAt.isNotEmpty) {
+            memberSince = DateTime.tryParse(createdAt);
+          }
+        } catch (_) {}
+        memberSince ??= now;
+
+        // Totals
+        final totalEntries = _journalEntries.length;
+        final storiesGenerated = _generatedStories.length;
+
+        // Favorite genres (top 1-3 by frequency)
+        final genreCounts = <String, int>{};
+        for (final s in _generatedStories) {
+          final g = (s['genre'] ?? '').toString().trim();
+          if (g.isEmpty) continue;
+          genreCounts[g] = (genreCounts[g] ?? 0) + 1;
+        }
+        final favGenres = genreCounts.entries.toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
+        final favoriteGenres = favGenres.map((e) => e.key).take(3).toList();
+
+        // Daily goal and progress
+        final dailyGoal = (raw['daily_goal'] is int)
+            ? raw['daily_goal'] as int
+            : int.tryParse((raw['daily_goal'] ?? '').toString()) ?? 300;
+        int dailyProgressWords = 0;
+        final today = DateTime(now.year, now.month, now.day);
+        for (final e in _journalEntries) {
+          try {
+            final created = DateTime.parse(e['created_at'].toString());
+            final d = DateTime(created.year, created.month, created.day);
+            if (d == today) {
+              dailyProgressWords += (e['word_count'] ?? 0) as int;
+            }
+          } catch (_) {}
+        }
+        final dailyProgressRatio = dailyGoal > 0
+            ? (dailyProgressWords / dailyGoal).clamp(0.0, 1.0)
+            : 0.0;
+
+        // Writing streak from profile (kept up-to-date by JournalService), fallback 0
+        final writingStreak = int.tryParse((raw['writing_streak'] ?? '0').toString()) ?? 0;
+
+        // Map to widget-friendly keys while preserving original fields
+        _userData = {
+          ...raw,
+          'name': displayName,
+          'email': email,
+          'avatar': raw['avatar_url'],
+          'bio': raw['bio'],
+          'memberSince': memberSince,
+          'writingStreak': writingStreak,
+          'totalEntries': totalEntries,
+          'storiesGenerated': storiesGenerated,
+          'favoriteGenres': favoriteGenres,
+          'dailyGoal': dailyGoal,
+          'dailyProgressWords': dailyProgressWords,
+          'dailyProgressRatio': dailyProgressRatio,
+        };
+      } catch (e) {
+        debugPrint('Failed to compute profile stats: $e');
+      }
+
       if (mounted) {
         setState(() => _isLoadingData = false);
       }
@@ -279,118 +358,12 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
   }
 
   void _showSettings() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (BuildContext context) {
-        return Container(
-          padding: EdgeInsets.all(4.w),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 12.w,
-                height: 0.5.h,
-                decoration: BoxDecoration(
-                  color: AppTheme.lightTheme.dividerColor,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              SizedBox(height: 3.h),
-              ListTile(
-                leading: CustomIconWidget(
-                  iconName: 'notifications',
-                  color: AppTheme.lightTheme.colorScheme.onSurface,
-                  size: 6.w,
-                ),
-                title: const Text('Notifications'),
-                onTap: () => Navigator.pop(context),
-              ),
-              ListTile(
-                leading: CustomIconWidget(
-                  iconName: 'backup',
-                  color: AppTheme.lightTheme.colorScheme.onSurface,
-                  size: 6.w,
-                ),
-                title: const Text('Backup & Sync'),
-                onTap: () => Navigator.pop(context),
-              ),
-              ListTile(
-                leading: CustomIconWidget(
-                  iconName: 'privacy_tip',
-                  color: AppTheme.lightTheme.colorScheme.onSurface,
-                  size: 6.w,
-                ),
-                title: const Text('Privacy'),
-                onTap: () => Navigator.pop(context),
-              ),
-              ListTile(
-                leading: CustomIconWidget(
-                  iconName: 'help',
-                  color: AppTheme.lightTheme.colorScheme.onSurface,
-                  size: 6.w,
-                ),
-                title: const Text('Help & Support'),
-                onTap: () => Navigator.pop(context),
-              ),
-              SizedBox(height: 1.h),
-              const Divider(height: 1),
-              SizedBox(height: 1.h),
-              // Sign Out action
-              ListTile(
-                leading: CustomIconWidget(
-                  iconName: 'logout',
-                  color: AppTheme.lightTheme.colorScheme.error,
-                  size: 6.w,
-                ),
-                title: Text(
-                  'Sign Out',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: AppTheme.lightTheme.colorScheme.error,
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
-                onTap: () async {
-                  final confirm = await showDialog<bool>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('Sign Out'),
-                      content: const Text(
-                        'Are you sure you want to sign out?',
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.of(ctx).pop(false),
-                          child: const Text('Cancel'),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.of(ctx).pop(true),
-                          child: Text(
-                            'Sign Out',
-                            style: TextStyle(
-                              color: AppTheme.lightTheme.colorScheme.error,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-
-                  if (confirm == true) {
-                    Navigator.of(context).pop(); // Close bottom sheet
-                    _handleLogout();
-                  }
-                },
-              ),
-              SizedBox(height: 2.h),
-            ],
-          ),
-        );
-      },
-    );
+    // Redirect Settings action to Profile tab per new UX: all settings live there
+    if (mounted) {
+      _tabController.animateTo(3); // Profile tab index
+      return;
+    }
+    // Fallback: if tab controller not ready, no-op
   }
 
   void _showAboutStoryWeaver() {
@@ -1323,11 +1296,12 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
                     Expanded(
                       child: ElevatedButton.icon(
                         onPressed: () {
+                          // Close the sheet and switch to the Stories tab instead of opening Story Library
                           Navigator.pop(context);
-                          Navigator.pushNamed(
-                            context,
-                            AppRoutes.storyLibraryScreen,
-                          );
+                          _tabController.animateTo(1);
+                          setState(() {
+                            _showStoryDetail = false;
+                          });
                         },
                         icon: CustomIconWidget(
                           iconName: 'library_books',
@@ -1374,6 +1348,7 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
 
   void _openStoryDetail(Map<String, dynamic> story) {
     setState(() {
+      _currentStory = story;
       _showStoryDetail = true;
       _tabController.animateTo(1); // Switch to Stories tab with detail view
       _storyTitle = story['title'] ?? 'Generated Story';
@@ -1382,7 +1357,7 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
       _creationDate = story['creationDate'] ?? DateTime.now();
       _wordCount = story['wordCount'] ?? 342;
       _readingTimeMinutes = story['readingTimeMinutes'] ?? 3;
-      _rating = story['rating'] ?? 4;
+      _rating = story['rating'] ?? 0; // default to unrated
       _isFavorite = story['isFavorite'] ?? false;
     });
   }
@@ -1421,10 +1396,15 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
   }
 
   void _shareStory() {
-    Fluttertoast.showToast(
-      msg: "Sharing story...",
-      toastLength: Toast.LENGTH_SHORT,
-      gravity: ToastGravity.BOTTOM,
+    Navigator.pushNamed(
+      context,
+      AppRoutes.storyShareScreen,
+      arguments: {
+        'title': _storyTitle,
+        'content': _storyContent,
+        'genre': _genre,
+        'storyId': _currentStory['id']?.toString(),
+      },
     );
   }
 
@@ -1440,10 +1420,25 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
     );
   }
 
-  void _updateStoryRating(int rating) {
+  Future<void> _updateStoryRating(int rating) async {
     setState(() {
       _rating = rating;
     });
+
+    // Persist rating only if we have a real UUID story id
+    try {
+      final id = _currentStory['id']?.toString();
+      final uuidPattern = RegExp(
+          r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$');
+      if (id != null && uuidPattern.hasMatch(id)) {
+        await StoryService.instance.updateGeneratedStory(
+          storyId: id,
+          rating: rating,
+        );
+      }
+    } catch (_) {
+      // Non-fatal: keep UI state even if persistence fails
+    }
 
     Fluttertoast.showToast(
       msg: "Story rated $_rating star${_rating == 1 ? '' : 's'}",
@@ -1505,14 +1500,25 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
             ),
           ),
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
-              _closeStoryDetail();
-              Fluttertoast.showToast(
-                msg: "Story deleted",
-                toastLength: Toast.LENGTH_SHORT,
-                gravity: ToastGravity.BOTTOM,
-              );
+              try {
+                final id = _currentStory['id']?.toString();
+                final uuidPattern = RegExp(
+                    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$');
+                if (id != null && uuidPattern.hasMatch(id)) {
+                  await StoryService.instance.deleteGeneratedStory(id);
+                }
+              } catch (_) {}
+              if (mounted) {
+                await _loadUserData();
+                _closeStoryDetail();
+                Fluttertoast.showToast(
+                  msg: "Story deleted",
+                  toastLength: Toast.LENGTH_SHORT,
+                  gravity: ToastGravity.BOTTOM,
+                );
+              }
             },
             style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: Text(
@@ -2874,49 +2880,39 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
 
                   SizedBox(height: 3.h),
 
-                  // Danger Zone
+                  // Account Actions (moved settings/sign out here)
                   Container(
                     width: double.infinity,
                     padding: EdgeInsets.all(4.w),
                     decoration: BoxDecoration(
-                      color: AppTheme.lightTheme.colorScheme.error.withValues(
-                        alpha: 0.1,
-                      ),
+                      color: AppTheme.lightTheme.colorScheme.surface,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: AppTheme.lightTheme.colorScheme.error.withValues(
-                          alpha: 0.3,
-                        ),
-                        width: 1,
-                      ),
+                      border: Border.all(color: AppTheme.lightTheme.dividerColor),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Danger Zone',
+                          'Account',
                           style: Theme.of(
                             context,
                           ).textTheme.titleMedium?.copyWith(
-                                color: AppTheme.lightTheme.colorScheme.error,
+                                color: AppTheme.lightTheme.colorScheme.onSurface,
                                 fontWeight: FontWeight.w600,
                               ),
                         ),
                         SizedBox(height: 2.h),
                         OutlinedButton.icon(
-                          onPressed: _deleteAccount,
+                          onPressed: _handleLogout,
                           icon: CustomIconWidget(
-                            iconName: 'delete_forever',
-                            color: AppTheme.lightTheme.colorScheme.error,
+                            iconName: 'logout',
+                            color: AppTheme.lightTheme.colorScheme.primary,
                             size: 5.w,
                           ),
-                          label: const Text('Delete Account'),
+                          label: const Text('Sign Out'),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor:
-                                AppTheme.lightTheme.colorScheme.error,
-                            side: BorderSide(
-                              color: AppTheme.lightTheme.colorScheme.error,
-                            ),
+                            foregroundColor: AppTheme.lightTheme.colorScheme.primary,
+                            side: BorderSide(color: AppTheme.lightTheme.colorScheme.primary),
                           ),
                         ),
                       ],
@@ -2952,16 +2948,7 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
 
   // Removed legacy export handler
 
-  void _deleteAccount() {
-    showDialog(
-      context: context,
-      builder: (context) => _buildDeleteAccountDialog(),
-    );
-  }
-
-  void _showSubscriptionInfo() {
-    _showEnhancedSubscriptionModal();
-  }
+  // Removed Delete Account flow and legacy subscription modal (moved to Profile UX)
 
   Widget _buildSettingsTile(
     String title,
@@ -3132,65 +3119,7 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
 
   // Removed legacy export dialog
 
-  Widget _buildDeleteAccountDialog() {
-    return AlertDialog(
-      title: Text(
-        'Delete Account',
-        style: TextStyle(color: AppTheme.lightTheme.colorScheme.error),
-      ),
-      content: const Text(
-        'Are you sure you want to delete your account? This action cannot be undone and all your data will be permanently lost.',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: () => Navigator.pop(context),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppTheme.lightTheme.colorScheme.error,
-          ),
-          child: const Text('Delete'),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSubscriptionModal() {
-    return Container(
-      height: 60.h,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: Padding(
-        padding: EdgeInsets.all(4.w),
-        child: Column(
-          children: [
-            Container(
-              width: 10.w,
-              height: 0.5.h,
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            SizedBox(height: 2.h),
-            Text(
-              'StoryWeaver Premium',
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            SizedBox(height: 3.h),
-            // Premium features would go here
-            const Center(child: Text('Premium features coming soon...')),
-          ],
-        ),
-      ),
-    );
-  }
+  // Removed legacy Delete Account and subscription modal widgets
 
   Widget _buildStatCard(String label, String value) {
     return Container(
@@ -3625,13 +3554,13 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
                     SizedBox(width: 3.w),
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: () => _exportStory('pdf'),
+                        onPressed: _deleteStory,
                         icon: CustomIconWidget(
-                          iconName: 'file_download',
-                          color: AppTheme.lightTheme.colorScheme.primary,
+                          iconName: 'delete',
+                          color: Colors.red,
                           size: 4.w,
                         ),
-                        label: const Text('Export'),
+                        label: const Text('Delete'),
                       ),
                     ),
                     SizedBox(width: 3.w),

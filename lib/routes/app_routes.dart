@@ -15,7 +15,7 @@ import '../presentation/register_screen/register_screen.dart';
 import '../presentation/splash_screen/splash_screen.dart';
 import '../presentation/story_detail_screen/story_detail_screen.dart';
 import '../presentation/story_generation_screen/story_generation_screen.dart';
-import '../presentation/story_library_screen/story_library_screen.dart';
+import '../presentation/story_share_screen/story_share_screen.dart';
 import '../presentation/subscription_screen/subscription_screen.dart';
 import '../presentation/user_profile_screen/user_profile_screen.dart';
 import '../presentation/writing_preferences_screen/writing_preferences_screen.dart';
@@ -44,6 +44,7 @@ class AppRoutes {
   static const String storyLibraryScreen = '/story_library_screen';
 
   static const String storyDetailScreen = '/story_detail_screen';
+  static const String storyShareScreen = '/story_share_screen';
 
   static const String userProfileScreen = '/user_profile_screen';
 
@@ -70,8 +71,8 @@ class AppRoutes {
         registerScreen: (context) => const RegisterScreen(),
         journalEntryCreation: (context) => const JournalEntryCreation(),
         storyGenerationScreen: (context) => const StoryGenerationScreen(),
-        storyLibraryScreen: (context) => const StoryLibraryScreen(),
         storyDetailScreen: (context) => const StoryDetailScreen(),
+  storyShareScreen: (context) => const StoryShareScreen(),
         userProfileScreen: (context) => const UserProfileScreen(),
         accountSettingsScreen: (context) => const AccountSettingsScreen(),
         writingPreferencesScreen: (context) => const WritingPreferencesScreen(),

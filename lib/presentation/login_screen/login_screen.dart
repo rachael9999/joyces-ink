@@ -229,7 +229,7 @@ class _LoginScreenState extends State<LoginScreen>
                         ),
                         child: CustomImageWidget(
                           imageUrl:
-                              'assets/images/_____2025-10-22_175115-1761185495284.png',
+                              'assets/images/img_app_logo.png',
                           width: 16.w,
                           height: 16.w,
                           semanticLabel:

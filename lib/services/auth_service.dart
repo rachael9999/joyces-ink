@@ -1,4 +1,5 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 import './supabase_service.dart';
 
@@ -143,8 +144,12 @@ class AuthService {
   Future<void> signInWithGoogle({String? redirectTo}) async {
     try {
       // Use supabase_flutter's OAuth flow. On web this will redirect.
-  // Use dynamic call to avoid type mismatches across supabase_flutter versions
-  await (_client.auth as dynamic).signInWithOAuth('google', redirectTo: redirectTo);
+      await _client.auth.signInWithOAuth(
+        OAuthProvider.google,
+        // If no explicit redirect is provided, compute a sensible default
+        // that matches Supabase Auth -> Settings -> Site URL/Redirect URLs.
+        redirectTo: redirectTo ?? _defaultRedirectTo(),
+      );
     } catch (error) {
       throw Exception('Google sign-in failed: $error');
     }
@@ -153,10 +158,36 @@ class AuthService {
   // Sign in with Apple (OAuth)
   Future<void> signInWithApple({String? redirectTo}) async {
     try {
-  await (_client.auth as dynamic).signInWithOAuth('apple', redirectTo: redirectTo);
+      await _client.auth.signInWithOAuth(
+        OAuthProvider.apple,
+        redirectTo: redirectTo ?? _defaultRedirectTo(),
+      );
     } catch (error) {
       throw Exception('Apple sign-in failed: $error');
     }
+  }
+
+  // Compute a default redirectTo URL that works across platforms.
+  // - Web: return the current app origin + path (no fragment), e.g. http://localhost:12345/ or https://app.example.com/
+  //        This must be listed in Supabase Auth -> Settings -> Site URL or Additional Redirect URLs.
+  // - Mobile/Desktop: use a custom scheme deep link. This app ships with io.supabase.flutter
+  //        configured in iOS Info.plist. Ensure Android intent-filters match if targeting Android.
+  String _defaultRedirectTo() {
+    if (kIsWeb) {
+      // Remove auth fragments, keep scheme/host/port/path so sub-path hosting works.
+      final base = Uri.base.removeFragment();
+      final cleaned = Uri(
+        scheme: base.scheme,
+        host: base.host,
+        port: base.hasPort ? base.port : null,
+        path: base.path, // include path in case the app is hosted under a subdirectory
+      ).toString();
+      return cleaned;
+    }
+
+    // Default deep link scheme used by supabase_flutter examples and this app's iOS config.
+    // Make sure this value is added to Supabase Auth -> Redirect URLs: io.supabase.flutter://login-callback
+    return 'io.supabase.flutter://login-callback';
   }
 
   // Sign in with email and password - Enhanced null safety and error handling

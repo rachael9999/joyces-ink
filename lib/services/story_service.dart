@@ -142,6 +142,8 @@ class StoryService {
     String? genre,
     int? rating,
     bool? isFavorite,
+    String? shareClip,
+    String? shareImageUrl,
   }) async {
     try {
       final userId = AuthService.instance.currentUser?.id;
@@ -158,6 +160,8 @@ class StoryService {
       if (genre != null) updates['genre'] = _normalizeGenre(genre);
       if (rating != null) updates['rating'] = rating;
       if (isFavorite != null) updates['is_favorite'] = isFavorite;
+  if (shareClip != null) updates['share_clip'] = shareClip;
+  if (shareImageUrl != null) updates['share_image_url'] = shareImageUrl;
 
       final response = await _client
           .from('generated_stories')

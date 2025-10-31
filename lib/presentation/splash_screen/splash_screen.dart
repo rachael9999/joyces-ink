@@ -193,7 +193,7 @@ class _SplashScreenState extends State<SplashScreen>
                               ),
                               child: Center(
                                 child: CustomImageWidget(
-                                  imageUrl: 'assets/images/img_app_logo.svg',
+                                  imageUrl: 'assets/images/img_app_logo.png',
                                   width: 15.w,
                                   height: 15.w,
                                   fit: BoxFit.contain,
