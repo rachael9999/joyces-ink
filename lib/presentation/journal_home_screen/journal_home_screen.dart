@@ -3048,8 +3048,15 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
   }
 
   Widget _buildEditProfileModal() {
+    final nameController = TextEditingController(
+      text: (_userData?['full_name'] ?? '').toString(),
+    );
+    final bioController = TextEditingController(
+      text: (_userData?['bio'] ?? '').toString(),
+    );
+
     return Container(
-      height: 70.h,
+      height: 60.h,
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -3057,25 +3064,98 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
       child: Padding(
         padding: EdgeInsets.all(4.w),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 10.w,
-              height: 0.5.h,
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
+            Center(
+              child: Container(
+                width: 10.w,
+                height: 0.5.h,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
             ),
             SizedBox(height: 2.h),
             Text(
               'Edit Profile',
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
             ),
-            SizedBox(height: 3.h),
-            // Edit profile form would go here
-            const Center(child: Text('Edit profile form coming soon...')),
+            SizedBox(height: 2.h),
+            TextField(
+              controller: nameController,
+              decoration: InputDecoration(
+                labelText: 'Full name',
+                prefixIcon: Padding(
+                  padding: EdgeInsets.all(3.w),
+                  child: CustomIconWidget(
+                    iconName: 'person',
+                    color: AppTheme.lightTheme.colorScheme.primary,
+                    size: 5.w,
+                  ),
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              textInputAction: TextInputAction.next,
+            ),
+            SizedBox(height: 1.5.h),
+            TextField(
+              controller: bioController,
+              maxLines: 3,
+              decoration: InputDecoration(
+                labelText: 'Bio',
+                alignLabelWithHint: true,
+                prefixIcon: Padding(
+                  padding: EdgeInsets.all(3.w),
+                  child: CustomIconWidget(
+                    iconName: 'notes',
+                    color: AppTheme.lightTheme.colorScheme.primary,
+                    size: 5.w,
+                  ),
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+            const Spacer(),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                SizedBox(width: 3.w),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      try {
+                        final fullName = nameController.text.trim();
+                        final bio = bioController.text.trim();
+                        await AuthService.instance.updateUserProfile(
+                          fullName: fullName.isEmpty ? null : fullName,
+                          bio: bio,
+                        );
+                        if (mounted) {
+                          Navigator.pop(context);
+                          await _loadUserData();
+                          Fluttertoast.showToast(msg: 'Profile updated');
+                        }
+                      } catch (e) {
+                        Fluttertoast.showToast(msg: 'Update failed');
+                      }
+                    },
+                    child: const Text('Save'),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -3083,37 +3163,53 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
   }
 
   Widget _buildWritingGoalsDialog() {
-    return AlertDialog(
-      title: const Text('Writing Goals'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text('Set your daily writing goal:'),
-          SizedBox(height: 2.h),
-          Slider(
-            value: _userData?['daily_goal'] ?? 300,
-            min: 100,
-            max: 1000,
-            divisions: 9,
-            label: '${_userData?['daily_goal'] ?? 300} words',
-            onChanged: (value) {
-              setState(() {
-                _userData?['daily_goal'] = value.round();
-              });
-            },
+    double current = ((_userData?['daily_goal'] ?? 300) as num).toDouble();
+    return StatefulBuilder(
+      builder: (context, setLocalState) {
+        return AlertDialog(
+          title: const Text('Writing Goals'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Set your daily writing goal:'),
+              SizedBox(height: 2.h),
+              Slider(
+                value: current,
+                min: 100,
+                max: 1000,
+                divisions: 9,
+                label: '${current.toInt()} words',
+                onChanged: (value) {
+                  setLocalState(() => current = value);
+                },
+              ),
+            ],
           ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Save'),
-        ),
-      ],
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                try {
+                  await AuthService.instance.updateUserProfile(
+                    dailyGoal: current.toInt(),
+                  );
+                  if (mounted) {
+                    Navigator.pop(context);
+                    await _loadUserData();
+                    Fluttertoast.showToast(msg: 'Daily goal updated');
+                  }
+                } catch (e) {
+                  Fluttertoast.showToast(msg: 'Failed to update');
+                }
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
     );
   }
 

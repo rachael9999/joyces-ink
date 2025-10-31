@@ -357,6 +357,7 @@ class AuthService {
     String? fullName,
     String? bio,
     String? avatarUrl,
+    int? dailyGoal,
   }) async {
     try {
       final user = currentUser;
@@ -369,6 +370,7 @@ class AuthService {
         updates['full_name'] = fullName;
       if (bio != null) updates['bio'] = bio;
       if (avatarUrl != null) updates['avatar_url'] = avatarUrl;
+      if (dailyGoal != null) updates['daily_goal'] = dailyGoal;
 
       updates['updated_at'] = DateTime.now().toIso8601String();
 

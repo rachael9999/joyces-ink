@@ -2,6 +2,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import './auth_service.dart';
 import './supabase_service.dart';
+import 'dart:typed_data';
 
 class JournalService {
   static JournalService? _instance;
@@ -10,6 +11,8 @@ class JournalService {
   JournalService._();
 
   SupabaseClient get _client => SupabaseService.instance.client;
+
+  // Mood: UI now provides exact DB enum values; no mapping here.
 
   // Get all journal entries for current user
   Future<List<Map<String, dynamic>>> getJournalEntries({
@@ -65,7 +68,7 @@ class JournalService {
 
       final wordCount = content.split(' ').length;
 
-      final response = await _client
+  final response = await _client
           .from('journal_entries')
           .insert({
             'user_id': userId,
@@ -107,7 +110,7 @@ class JournalService {
         updates['word_count'] = content.split(' ').length;
       }
       if (preview != null) updates['preview'] = preview;
-      if (mood != null) updates['mood'] = mood;
+  if (mood != null) updates['mood'] = mood;
       if (isFavorite != null) updates['is_favorite'] = isFavorite;
 
       final response = await _client
@@ -162,6 +165,60 @@ class JournalService {
         return null; // Entry not found
       }
       throw Exception('Get journal entry failed: $error');
+    }
+  }
+
+  // Upload a single attachment to Supabase Storage and return public URL
+  Future<String?> uploadJournalAttachmentBytes({
+    required Uint8List bytes,
+    required String entryId,
+    required String fileName,
+    String contentType = 'image/jpeg',
+  }) async {
+    try {
+      final userId = AuthService.instance.currentUser?.id;
+      if (userId == null) throw Exception('User not authenticated');
+
+      final bucket = SupabaseService.instance.client.storage.from('journal-attachments');
+      final path = userId + '/' + entryId + '/' + fileName;
+      await bucket.uploadBinary(
+        path,
+        bytes,
+        fileOptions: FileOptions(contentType: contentType, upsert: true),
+      );
+      return bucket.getPublicUrl(path);
+    } catch (e) {
+      return null; // Non-fatal: skip failed uploads
+    }
+  }
+
+  // Replace attachments for an entry: delete old, insert new URLs
+  Future<void> replaceEntryAttachments({
+    required String entryId,
+    required List<String> urls,
+  }) async {
+    try {
+      final userId = AuthService.instance.currentUser?.id;
+      if (userId == null) throw Exception('User not authenticated');
+
+      final client = SupabaseService.instance.client;
+      // Delete existing attachments for this entry
+      await client
+          .from('journal_entry_attachments')
+          .delete()
+          .eq('entry_id', entryId)
+          .eq('user_id', userId);
+
+      if (urls.isEmpty) return;
+
+      final rows = urls.map((u) => {
+            'entry_id': entryId,
+            'user_id': userId,
+            'url': u,
+          });
+      await client.from('journal_entry_attachments').insert(rows.toList());
+    } catch (e) {
+      // swallow errors to avoid blocking the journal save
     }
   }
 

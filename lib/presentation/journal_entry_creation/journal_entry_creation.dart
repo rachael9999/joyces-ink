@@ -284,19 +284,57 @@ class _JournalEntryCreationState extends State<JournalEntryCreation>
       String preview = _entryText.split(' ').take(20).join(' ');
       if (_entryText.split(' ').length > 20) preview += '...';
 
+      String? savedEntryId;
       if (_isEditMode && _editingEntry != null) {
-        await JournalService.instance.updateJournalEntry(
+        final updated = await JournalService.instance.updateJournalEntry(
           entryId: _editingEntry!['id'],
           content: _entryText,
           preview: preview,
           mood: _selectedMood,
         );
+        savedEntryId = updated['id']?.toString() ?? _editingEntry!['id']?.toString();
       } else {
-        await JournalService.instance.createJournalEntry(
+        final created = await JournalService.instance.createJournalEntry(
           content: _entryText,
           preview: preview,
           mood: _selectedMood,
         );
+        savedEntryId = created['id']?.toString();
+      }
+
+      // Upload photos if any and persist attachment URLs
+      if (savedEntryId != null && _attachedPhotos.isNotEmpty) {
+        final urls = <String>[];
+        for (final photo in _attachedPhotos) {
+          try {
+            final bytes = await photo.readAsBytes();
+            final path = photo.path;
+            final ext = path.toLowerCase().endsWith('.png')
+                ? 'png'
+                : path.toLowerCase().endsWith('.webp')
+                    ? 'webp'
+                    : 'jpg';
+            final contentType = ext == 'png'
+                ? 'image/png'
+                : ext == 'webp'
+                    ? 'image/webp'
+                    : 'image/jpeg';
+            final fileName = DateTime.now().millisecondsSinceEpoch.toString() + '.' + ext;
+            final url = await JournalService.instance.uploadJournalAttachmentBytes(
+              bytes: bytes,
+              entryId: savedEntryId,
+              fileName: fileName,
+              contentType: contentType,
+            );
+            if (url != null && url.isNotEmpty) urls.add(url);
+          } catch (_) {}
+        }
+        try {
+          await JournalService.instance.replaceEntryAttachments(
+            entryId: savedEntryId,
+            urls: urls,
+          );
+        } catch (_) {}
       }
 
       setState(() {
