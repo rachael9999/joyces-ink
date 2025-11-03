@@ -332,8 +332,6 @@ class PrivacyDashboardWidget extends StatelessWidget {
 
   void _showFullActivityLog(
       BuildContext context, List<Map<String, dynamic>> activities) {
-    final theme = Theme.of(context);
-
     showDialog(
       context: context,
       builder: (context) => AlertDialog(

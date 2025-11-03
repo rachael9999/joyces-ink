@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:sizer/sizer.dart';
 
 import '../../core/app_export.dart';
+import '../../core/text_metrics.dart';
 import '../../services/journal_service.dart';
 import './widgets/mood_selector_widget.dart';
 import './widgets/photo_attachment_widget.dart';
@@ -63,7 +64,7 @@ class _JournalEntryCreationState extends State<JournalEntryCreation>
         _entryText = _editingEntry!['content'] ?? '';
         _selectedMood = _editingEntry!['mood'] ?? '';
         _entryDate = _editingEntry!['date'] ?? DateTime.now();
-        _wordCount = _editingEntry!['wordCount'] ?? 0;
+        _wordCount = TextMetrics.countWords(_entryText);
         _characterCount = _entryText.length;
         // Note: In a real app, you'd also load photos and recordings
       });
@@ -96,8 +97,7 @@ class _JournalEntryCreationState extends State<JournalEntryCreation>
     setState(() {
       _entryText = text;
       _hasUnsavedChanges = true;
-      _wordCount =
-          text.trim().isEmpty ? 0 : text.trim().split(RegExp(r'\s+')).length;
+      _wordCount = TextMetrics.countWords(text);
       _characterCount = text.length;
     });
   }
@@ -107,10 +107,7 @@ class _JournalEntryCreationState extends State<JournalEntryCreation>
       _voiceTranscription = transcription;
       _entryText = transcription;
       _hasUnsavedChanges = true;
-      _wordCount =
-          transcription.trim().isEmpty
-              ? 0
-              : transcription.trim().split(RegExp(r'\s+')).length;
+      _wordCount = TextMetrics.countWords(transcription);
       _characterCount = transcription.length;
     });
   }
@@ -142,10 +139,7 @@ class _JournalEntryCreationState extends State<JournalEntryCreation>
     setState(() {
       _entryText = _entryText.isEmpty ? prompt : '$_entryText\n\n$prompt';
       _hasUnsavedChanges = true;
-      _wordCount =
-          _entryText.trim().isEmpty
-              ? 0
-              : _entryText.trim().split(RegExp(r'\s+')).length;
+      _wordCount = TextMetrics.countWords(_entryText);
       _characterCount = _entryText.length;
     });
   }
@@ -330,11 +324,17 @@ class _JournalEntryCreationState extends State<JournalEntryCreation>
           } catch (_) {}
         }
         try {
-          await JournalService.instance.replaceEntryAttachments(
+          final inserted = await JournalService.instance.replaceEntryAttachments(
             entryId: savedEntryId,
             urls: urls,
           );
-        } catch (_) {}
+          // Optional: debug print for verification
+          // ignore: avoid_print
+          print('[attachments] Persisted $inserted attachments for entry $savedEntryId');
+        } catch (e) {
+          // ignore: avoid_print
+          print('[attachments] Failed to persist attachments for entry $savedEntryId: $e');
+        }
       }
 
       setState(() {
@@ -816,6 +816,59 @@ class _JournalEntryCreationState extends State<JournalEntryCreation>
                         onPhotosSelected: _onPhotosSelected,
                         initialPhotos: _attachedPhotos,
                       ),
+
+                      // Existing attachments (when editing)
+                      if (_isEditMode)
+                        Builder(
+                          builder: (_) {
+                            final urls = (_editingEntry != null && _editingEntry!['attachments'] is List)
+                                ? (_editingEntry!['attachments'] as List).whereType<String>().toList()
+                                : <String>[];
+                            if (urls.isEmpty) return const SizedBox.shrink();
+                            return Container(
+                              margin: EdgeInsets.only(top: 1.5.h),
+                              alignment: Alignment.centerLeft,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Attached Photos',
+                                    style: AppTheme.lightTheme.textTheme.labelMedium?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  SizedBox(height: 1.h),
+                                  SizedBox(
+                                    height: 14.h,
+                                    child: ListView.separated(
+                                      scrollDirection: Axis.horizontal,
+                                      itemCount: urls.length.clamp(0, 10),
+                                      separatorBuilder: (_, __) => SizedBox(width: 2.w),
+                                      itemBuilder: (context, index) {
+                                        final url = urls[index];
+                                        return ClipRRect(
+                                          borderRadius: BorderRadius.circular(8),
+                                          child: AspectRatio(
+                                            aspectRatio: 1,
+                                            child: Image.network(
+                                              url,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (_, __, ___) => Container(
+                                                color: Colors.grey.shade200,
+                                                alignment: Alignment.center,
+                                                child: const Icon(Icons.broken_image, size: 20),
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
 
                       SizedBox(height: 4.h),
                     ],

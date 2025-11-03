@@ -26,7 +26,6 @@ class _VoiceRecordingWidgetState extends State<VoiceRecordingWidget>
   final AudioRecorder _audioRecorder = AudioRecorder();
   bool _isRecording = false;
   bool _isPaused = false;
-  String _recordingPath = '';
   String _transcription = '';
   Duration _recordingDuration = Duration.zero;
 
@@ -113,7 +112,6 @@ class _VoiceRecordingWidgetState extends State<VoiceRecordingWidget>
         setState(() {
           _isRecording = true;
           _isPaused = false;
-          _recordingPath = path;
           _recordingDuration = Duration.zero;
         });
 
@@ -218,7 +216,6 @@ class _VoiceRecordingWidgetState extends State<VoiceRecordingWidget>
     setState(() {
       _isRecording = false;
       _isPaused = false;
-      _recordingPath = '';
       _transcription = '';
       _recordingDuration = Duration.zero;
     });

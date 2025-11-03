@@ -62,7 +62,17 @@ class _StoryGenerationScreenState extends State<StoryGenerationScreen>
   void initState() {
     super.initState();
     _initializeServices();
-    _loadJournalEntry();
+    // Prefer the entry passed via navigation arguments; fallback to latest entry
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final args = ModalRoute.of(context)?.settings.arguments;
+      if (args is Map<String, dynamic> && args.isNotEmpty) {
+        setState(() {
+          _selectedJournalEntry = args;
+        });
+      } else {
+        _loadJournalEntry();
+      }
+    });
 
     _progressAnimationController = AnimationController(
       duration: const Duration(seconds: 1),
@@ -95,8 +105,7 @@ class _StoryGenerationScreenState extends State<StoryGenerationScreen>
   Future<void> _loadJournalEntry() async {
     try {
       // Get the most recent journal entry or use passed argument
-      final entries =
-          await JournalService.instance.getJournalEntries(limit: 1);
+      final entries = await JournalService.instance.getJournalEntries(limit: 1);
       if (entries.isNotEmpty) {
         setState(() {
           _selectedJournalEntry = entries.first;
@@ -223,56 +232,60 @@ class _StoryGenerationScreenState extends State<StoryGenerationScreen>
     }
   }
 
-  // Extract content between **title** and **end**, parse first Markdown H1 as title.
+  // Extract content bounded by optional **title** ... **end** markers, strip '**Untitled Entry**' and H1 as title.
   Map<String, String> _extractStructuredStory(String raw) {
-    final text = raw.trim();
+    String text = raw.trim();
+
+  // Remove a trailing **end** marker anywhere near the end
+  text = text
+    .replaceFirst(
+      RegExp(r"\s*\*\*\s*end\s*\*\*\s*$", caseSensitive: false),
+      '')
+    .trim();
+
+    // If a **title** marker exists, start after it; otherwise start at beginning
     final titleMarker = RegExp(r"\*\*\s*title\s*\*\*", caseSensitive: false);
-    final endMarker = RegExp(r"\*\*\s*end\s*\*\*", caseSensitive: false);
+    final altUntitledMarker = RegExp(r"\*\*\s*untitled\s*entry\s*\*\*", caseSensitive: false);
+    final titleMatch = titleMarker.firstMatch(text) ?? altUntitledMarker.firstMatch(text);
 
-    final start = titleMarker.firstMatch(text);
-    if (start == null) {
-      // No marker: return whole text as body
-      return {'title': '', 'body': text};
-    }
-    final startIndex = start.end;
-    final rest = text.substring(startIndex);
-    final end = endMarker.firstMatch(rest);
-    String contentSegment = (end != null)
-        ? rest.substring(0, end.start)
-        : rest; // tolerate missing **end**
+    String segment = (titleMatch != null) ? text.substring(titleMatch.end).trimLeft() : text;
 
-    // Sanitize: remove stray markers/echoes like **Untitled Entry**
-    List<String> lines = contentSegment.trim().split(RegExp(r'\r?\n'));
+    // Split into lines for sanitation
+    List<String> lines = segment.split(RegExp(r'\r?\n'));
+
     // Drop leading empty lines
     while (lines.isNotEmpty && lines.first.trim().isEmpty) {
-      lines = lines.sublist(1);
-    }
-    // Drop a leading bold/plain "Untitled Entry" line if present
-    final untitledPattern = RegExp(r'^(\*\*|__)?\s*Untitled\s+Entry\s*(\*\*|__)?$', caseSensitive: false);
-    if (lines.isNotEmpty && untitledPattern.hasMatch(lines.first.trim())) {
-      lines = lines.sublist(1);
+      lines.removeAt(0);
     }
 
-    // Also remove any trailing plain/bold 'end' tokens if model printed without markers
+    // Drop a leading 'Untitled Entry' line (bold/plain)
+    final untitledPattern = RegExp(r'^(\*\*|__)?\s*Untitled\s+Entry\s*(\*\*|__)?$', caseSensitive: false);
+    if (lines.isNotEmpty && untitledPattern.hasMatch(lines.first.trim())) {
+      lines.removeAt(0);
+    }
+
+    // Remove any stray trailing 'end' token if printed without markers
     final plainEndPattern = RegExp(r'^(\*\*|__)?\s*end\s*(\*\*|__)?$', caseSensitive: false);
     while (lines.isNotEmpty && plainEndPattern.hasMatch(lines.last.trim())) {
       lines.removeLast();
     }
 
-    contentSegment = lines.join('\n');
+    // Recompose cleaned text
+    segment = lines.join('\n').trim();
 
-    // Parse first line as H1 title if present
-    lines = contentSegment.trim().split(RegExp(r'\r?\n'));
+    // Parse first header line as title. Accept '#Title' and '# Title'.
+    final headerLines = segment.split(RegExp(r'\r?\n'));
     String parsedTitle = '';
-    String body = contentSegment.trim();
-    if (lines.isNotEmpty) {
-      final h1 = RegExp(r'^\s*#\s+(.+)$');
-      final m = h1.firstMatch(lines[0]);
+    String body = segment;
+    if (headerLines.isNotEmpty) {
+      final h1 = RegExp(r'^\s*#\s*(.+)$');
+      final m = h1.firstMatch(headerLines.first);
       if (m != null) {
         parsedTitle = (m.group(1) ?? '').trim();
-        body = lines.skip(1).join('\n').trim();
+        body = headerLines.skip(1).join('\n').trim();
       }
     }
+
     return {'title': parsedTitle, 'body': body};
   }
 
@@ -340,7 +353,7 @@ class _StoryGenerationScreenState extends State<StoryGenerationScreen>
     if (_generatedStory == null) return;
 
     try {
-      final saved = await StoryService.instance.createGeneratedStory(
+      await StoryService.instance.createGeneratedStory(
         journalEntryId: _selectedJournalEntry?['id']?.toString(),
         title: _generatedStory!['title'],
         content: _generatedStory!['content'],
@@ -357,17 +370,12 @@ class _StoryGenerationScreenState extends State<StoryGenerationScreen>
         textColor: AppTheme.onPrimaryLight,
       );
 
-      // Open Share screen pre-populated
+      // Navigate to Home after successful save and clear back stack
       if (mounted) {
-        Navigator.pushNamed(
+        Navigator.pushNamedAndRemoveUntil(
           context,
-          AppRoutes.storyShareScreen,
-          arguments: {
-            'title': saved['title'] ?? _generatedStory!['title'],
-            'content': saved['content'] ?? _generatedStory!['content'],
-            'genre': saved['genre'] ?? _generatedStory!['genre'],
-            'storyId': saved['id'].toString(),
-          },
+          AppRoutes.journalHomeScreen,
+          (route) => false,
         );
       }
     } catch (error) {

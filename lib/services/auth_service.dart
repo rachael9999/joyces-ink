@@ -70,7 +70,7 @@ class AuthService {
             .eq('email', email)
             .maybeSingle();
 
-        if (existing != null && existing is Map && existing['id'] != null) {
+        if (existing != null && existing['id'] != null) {
           throw Exception('An account with this email already exists.');
         }
       } catch (_) {

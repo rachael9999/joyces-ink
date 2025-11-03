@@ -4,6 +4,9 @@ import 'package:sizer/sizer.dart';
 import '../../core/app_export.dart';
 import '../../services/auth_service.dart';
 import '../../services/supabase_service.dart';
+import '../../services/settings_service.dart';
+import '../../services/storage_metrics_service.dart';
+import '../../services/backup_service.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import './widgets/profile_header_widget.dart';
@@ -29,6 +32,8 @@ class _UserProfileScreenState extends State<UserProfileScreen>
   bool _notificationsEnabled = true;
   bool _backupEnabled = true;
   bool _privacyMode = false;
+  String _storageSubtitle = '—';
+  DateTime? _lastBackupAt;
 
   // User data (loaded from Supabase)
   Map<String, dynamic> _userData = {
@@ -52,6 +57,65 @@ class _UserProfileScreenState extends State<UserProfileScreen>
     _tabController = TabController(length: 3, vsync: this, initialIndex: 2);
     _initializeAnimations();
     _loadUser();
+    _loadSettings();
+    _refreshStorageMetrics();
+  }
+  Future<void> _loadSettings() async {
+    try {
+      await SettingsService.instance.load();
+      if (!mounted) return;
+      setState(() {
+        _privacyMode = SettingsService.instance.privacyMode;
+        _backupEnabled = SettingsService.instance.autoBackupEnabled;
+        _lastBackupAt = SettingsService.instance.lastBackupAt;
+      });
+      SettingsService.instance.onChanged.listen((_) {
+        if (!mounted) return;
+        setState(() {
+          _privacyMode = SettingsService.instance.privacyMode;
+          _backupEnabled = SettingsService.instance.autoBackupEnabled;
+          _lastBackupAt = SettingsService.instance.lastBackupAt;
+        });
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _refreshStorageMetrics() async {
+    try {
+      final bytes = await StorageMetricsService.instance.computeTotalBytes();
+      if (!mounted) return;
+      final entries = (_userData['totalEntries'] as int?) ?? 0;
+      final size = StorageMetricsService.formatBytes(bytes);
+      final last = _lastBackupAt;
+      final lastStr = last != null
+          ? ', last backup: ${last.toLocal().toString().split('.').first}'
+          : '';
+      setState(() {
+        _storageSubtitle = '$entries entries, $size$lastStr';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      final entries = (_userData['totalEntries'] as int?) ?? 0;
+      setState(() {
+        _storageSubtitle = '$entries entries, unknown size';
+      });
+    }
+  }
+
+  Future<void> _backupNow() async {
+    try {
+      final count = await BackupService.instance.backupAllEntries();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Backed up $count entries')),
+      );
+      await _refreshStorageMetrics();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Backup failed: $e')),
+      );
+    }
   }
   Future<void> _loadUser() async {
     try {
@@ -68,15 +132,16 @@ class _UserProfileScreenState extends State<UserProfileScreen>
             ? DateTime.tryParse(profile['created_at'])
             : null;
       });
+      await _refreshStorageMetrics();
     } catch (e) {
       // Keep defaults on failure
     }
   }
 
-  Future<void> _pickAndUploadAvatar() async {
+  Future<void> _pickAndUploadAvatar(ImageSource source) async {
     try {
       final picker = ImagePicker();
-      final file = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+      final file = await picker.pickImage(source: source, imageQuality: 85);
       if (file == null) return;
 
       final user = AuthService.instance.currentUser;
@@ -84,17 +149,39 @@ class _UserProfileScreenState extends State<UserProfileScreen>
 
       final bytes = await file.readAsBytes();
       final ext = file.name.split('.').last.toLowerCase();
-      final path = 'public/${user.id}.${ext.isEmpty ? 'jpg' : ext}';
+      final path = '${user.id}/avatar.${ext.isEmpty ? 'jpg' : ext}';
       final storage = SupabaseService.instance.client.storage.from('avatars');
 
-      // Attempt upload; overwrite any existing
-      await storage.uploadBinary(path, bytes, fileOptions: const FileOptions(upsert: true, contentType: 'image/jpeg'));
+      final contentType = () {
+        switch (ext) {
+          case 'png':
+            return 'image/png';
+          case 'webp':
+            return 'image/webp';
+          case 'jpg':
+          case 'jpeg':
+          default:
+            return 'image/jpeg';
+        }
+      }();
+
+      await storage.uploadBinary(
+        path,
+        bytes,
+        fileOptions: FileOptions(upsert: true, contentType: contentType),
+      );
       final publicUrl = storage.getPublicUrl(path);
 
-      await AuthService.instance.updateUserProfile(avatarUrl: publicUrl);
+      // Save plain URL to profile
+      final updated = await AuthService.instance.updateUserProfile(avatarUrl: publicUrl);
 
+      // Bust cache in UI immediately
+      final cacheBustedUrl = publicUrl + '?ts=' + DateTime.now().millisecondsSinceEpoch.toString();
       setState(() {
-        _userData['avatar'] = publicUrl;
+        _userData['avatar'] = cacheBustedUrl;
+        if (updated['updated_at'] != null) {
+          _userData['updated_at'] = updated['updated_at'];
+        }
       });
 
       if (mounted) {
@@ -106,6 +193,75 @@ class _UserProfileScreenState extends State<UserProfileScreen>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to update photo: ${e.toString().replaceFirst('Exception: ', '')}')),
+      );
+    }
+  }
+
+  void _showAvatarOptions() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_camera),
+                title: const Text('Take Photo'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _pickAndUploadAvatar(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library),
+                title: const Text('Choose from Gallery'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _pickAndUploadAvatar(ImageSource.gallery);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline),
+                title: const Text('Remove Photo'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await _removeAvatar();
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _removeAvatar() async {
+    try {
+      final user = AuthService.instance.currentUser;
+      if (user == null) return;
+      await SupabaseService.instance.client
+          .from('user_profiles')
+          .update({
+            'avatar_url': null,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', user.id);
+      setState(() {
+        _userData['avatar'] = null;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Profile photo removed')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to remove photo: ${e.toString().replaceFirst('Exception: ', '')}')),
       );
     }
   }
@@ -280,7 +436,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                           // Profile Header
                           ProfileHeaderWidget(
                             userData: _userData,
-                            onAvatarTap: _pickAndUploadAvatar,
+                            onAvatarTap: _showAvatarOptions,
                           ),
 
                           SizedBox(height: 3.h),
@@ -367,10 +523,11 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                                 'Hide entries from quick preview',
                                 'visibility_off',
                                 _privacyMode,
-                                (value) {
+                                (value) async {
                                   setState(() {
                                     _privacyMode = value;
                                   });
+                                  await SettingsService.instance.setPrivacyMode(value);
                                 },
                               ),
                             ],
@@ -386,17 +543,26 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                                 'Automatically backup your data',
                                 'backup',
                                 _backupEnabled,
-                                (value) {
+                                (value) async {
                                   setState(() {
                                     _backupEnabled = value;
                                   });
+                                  await SettingsService.instance.setAutoBackupEnabled(value);
                                 },
                               ),
                               _buildSettingsTile(
+                                'Backup Now',
+                                _lastBackupAt != null
+                                    ? 'Last backup: ${_lastBackupAt!.toLocal().toString().split('.').first}'
+                                    : 'Never backed up',
+                                'settings_backup_restore',
+                                _backupNow,
+                              ),
+                              _buildSettingsTile(
                                 'Storage',
-                                '${_userData['totalEntries']} entries, 2.4 MB',
+                                _storageSubtitle,
                                 'storage',
-                                () {},
+                                _refreshStorageMetrics,
                               ),
                               _buildSettingsTile(
                                 'About StoryWeaver',

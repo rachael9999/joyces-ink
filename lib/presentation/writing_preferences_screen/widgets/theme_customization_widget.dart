@@ -17,7 +17,6 @@ class _ThemeCustomizationWidgetState extends State<ThemeCustomizationWidget> {
   Color _primaryColor = const Color(0xFF6366F1);
   Color _accentColor = const Color(0xFF8B5CF6);
   String _fontTheme = 'modern';
-  bool _darkModeAuto = true;
   TimeOfDay _darkModeStartTime = const TimeOfDay(hour: 22, minute: 0);
   TimeOfDay _darkModeEndTime = const TimeOfDay(hour: 6, minute: 0);
   double _borderRadius = 12.0;

@@ -1,8 +1,11 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../core/text_metrics.dart';
 
 import './auth_service.dart';
 import './supabase_service.dart';
 import 'dart:typed_data';
+import './settings_service.dart';
+import './backup_service.dart';
 
 class JournalService {
   static JournalService? _instance;
@@ -23,10 +26,11 @@ class JournalService {
       final userId = AuthService.instance.currentUser?.id;
       if (userId == null) throw Exception('User not authenticated');
 
-      var query = _client
-          .from('journal_entries')
-          .select('id, title, content, preview, mood, word_count, created_at, is_favorite')
-          .eq('user_id', userId);
+    var query = _client
+      .from('journal_entries')
+      // Use explicit embed hint to bind child rows via FK entry_id -> id
+      .select('id, title, content, preview, mood, word_count, created_at, is_favorite, journal_entry_attachments!entry_id(url)')
+      .eq('user_id', userId);
 
       if (searchQuery != null && searchQuery.isNotEmpty) {
         query = query
@@ -38,13 +42,25 @@ class JournalService {
           .limit(limit ?? 50);
 
       return List<Map<String, dynamic>>.from(response)
-          .map((entry) => {
-                ...entry,
-                'preview': entry['preview'] ?? '',
-                'mood': entry['mood'] ?? 'neutral',
-                'word_count': entry['word_count'] ?? 0,
-                'is_favorite': entry['is_favorite'] ?? false,
-              })
+          .map((entry) {
+            // Extract attachments URLs into a flat list
+            final attachmentsRaw = entry['journal_entry_attachments'] as List<dynamic>?;
+            final attachments = attachmentsRaw == null
+                ? <String>[]
+                : attachmentsRaw
+                    .map((e) => (e is Map && e['url'] != null) ? e['url'].toString() : '')
+                    .where((u) => u.isNotEmpty)
+                    .toList();
+
+            return {
+              ...entry,
+              'preview': entry['preview'] ?? '',
+              'mood': entry['mood'] ?? 'neutral',
+              'word_count': entry['word_count'] ?? 0,
+              'is_favorite': entry['is_favorite'] ?? false,
+              'attachments': attachments,
+            };
+          })
           .toList();
     } catch (error) {
       print('Error fetching journal entries: $error');
@@ -66,7 +82,7 @@ class JournalService {
       final userId = AuthService.instance.currentUser?.id;
       if (userId == null) throw Exception('User not authenticated');
 
-      final wordCount = content.split(' ').length;
+  final wordCount = TextMetrics.countWords(content);
 
   final response = await _client
           .from('journal_entries')
@@ -77,12 +93,25 @@ class JournalService {
             'preview': preview,
             'mood': mood,
             'word_count': wordCount,
+            'created_at': DateTime.now().toIso8601String(),
           })
           .select()
           .single();
 
       // Update user stats
       await _updateUserStats();
+
+      // Auto backup if enabled
+      try {
+        if (SettingsService.instance.autoBackupEnabled) {
+          final id = (response['id'] ?? '').toString();
+          if (id.isNotEmpty) {
+            // Fire-and-forget backup
+            // ignore: unawaited_futures
+            BackupService.instance.backupEntryById(id);
+          }
+        }
+      } catch (_) {}
 
       return response;
     } catch (error) {
@@ -98,6 +127,7 @@ class JournalService {
     String? preview,
     String? mood,
     bool? isFavorite,
+    String? createdAt,
   }) async {
     try {
       final userId = AuthService.instance.currentUser?.id;
@@ -107,9 +137,10 @@ class JournalService {
       if (title != null) updates['title'] = title;
       if (content != null) {
         updates['content'] = content;
-        updates['word_count'] = content.split(' ').length;
+        updates['word_count'] = TextMetrics.countWords(content);
       }
       if (preview != null) updates['preview'] = preview;
+      if (createdAt != null) updates['created_at'] = createdAt;
   if (mood != null) updates['mood'] = mood;
       if (isFavorite != null) updates['is_favorite'] = isFavorite;
 
@@ -120,6 +151,18 @@ class JournalService {
           .eq('user_id', userId)
           .select()
           .single();
+
+      // Auto backup if enabled
+      try {
+        if (SettingsService.instance.autoBackupEnabled) {
+          final id = (response['id'] ?? entryId).toString();
+          if (id.isNotEmpty) {
+            // Fire-and-forget backup
+            // ignore: unawaited_futures
+            BackupService.instance.backupEntryById(id);
+          }
+        }
+      } catch (_) {}
 
       return response;
     } catch (error) {
@@ -193,7 +236,8 @@ class JournalService {
   }
 
   // Replace attachments for an entry: delete old, insert new URLs
-  Future<void> replaceEntryAttachments({
+  // Returns number of rows inserted
+  Future<int> replaceEntryAttachments({
     required String entryId,
     required List<String> urls,
   }) async {
@@ -209,16 +253,29 @@ class JournalService {
           .eq('entry_id', entryId)
           .eq('user_id', userId);
 
-      if (urls.isEmpty) return;
+      if (urls.isEmpty) {
+        print('[attachments] No URLs to insert for entry $entryId');
+        return 0;
+      }
 
       final rows = urls.map((u) => {
             'entry_id': entryId,
             'user_id': userId,
             'url': u,
           });
-      await client.from('journal_entry_attachments').insert(rows.toList());
+    final inserted = await client
+          .from('journal_entry_attachments')
+          .insert(rows.toList())
+          .select('id');
+
+    final List insertedList = inserted as List;
+    final count = insertedList.length;
+      print('[attachments] Inserted $count rows for entry $entryId');
+      return count;
     } catch (e) {
-      // swallow errors to avoid blocking the journal save
+      // Log errors for diagnosis but avoid blocking journal save
+      print('[attachments] Failed to replace attachments for $entryId: $e');
+      return 0;
     }
   }
 

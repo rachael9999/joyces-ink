@@ -51,12 +51,6 @@ class _PrivacySecurityScreenState extends State<PrivacySecurityScreen> {
 
   // Cloud Sync Privacy
   bool _cloudSyncEnabled = true;
-  Map<String, bool> _syncPermissions = {
-    'journalEntries': true,
-    'preferences': true,
-    'generatedStories': false,
-    'analytics': false,
-  };
 
   // Third-party integrations
   final List<Map<String, dynamic>> _thirdPartyServices = [

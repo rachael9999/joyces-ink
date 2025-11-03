@@ -9,6 +9,7 @@ class JournalEntryCardWidget extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onTransform;
   final VoidCallback onDelete;
+  final bool privacyMode;
 
   const JournalEntryCardWidget({
     Key? key,
@@ -17,12 +18,13 @@ class JournalEntryCardWidget extends StatelessWidget {
     required this.onEdit,
     required this.onTransform,
     required this.onDelete,
+    this.privacyMode = false,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     final date = DateTime.parse(entry['created_at'] as String);
-    final preview = entry['preview'] as String? ?? '';
+  final preview = entry['preview'] as String? ?? '';
     final mood = entry['mood'] as String? ?? 'neutral';
     final wordCount = entry['word_count'] as int? ?? 0;
 
@@ -100,12 +102,51 @@ class JournalEntryCardWidget extends StatelessWidget {
                   ],
                 ),
                 SizedBox(height: 2.h),
-                Text(
-                  preview,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                if (privacyMode)
+                  Row(
+                    children: [
+                      CustomIconWidget(
+                        iconName: 'visibility_off',
+                        color: AppTheme.lightTheme.colorScheme.onSurface
+                            .withValues(alpha: 0.6),
+                        size: 4.w,
+                      ),
+                      SizedBox(width: 2.w),
+                      Expanded(
+                        child: Text(
+                          'Hidden by Privacy Mode',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: AppTheme.lightTheme.colorScheme.onSurface
+                                    .withValues(alpha: 0.6),
+                                fontStyle: FontStyle.italic,
+                              ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  )
+                else
+                  Text(
+                    preview,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                SizedBox(height: 1.5.h),
+                // Attachments preview thumbnails (if any)
+                if (!privacyMode)
+                  Builder(
+                  builder: (_) {
+                    final attachments = (entry['attachments'] is List)
+                        ? (entry['attachments'] as List)
+                            .whereType<String>()
+                            .toList()
+                        : <String>[];
+                    if (attachments.isEmpty) return const SizedBox.shrink();
+                    return _buildAttachmentsRow(attachments);
+                  },
+                  ),
                 SizedBox(height: 2.h),
                 Row(
                   children: [
@@ -141,6 +182,10 @@ class JournalEntryCardWidget extends StatelessWidget {
         moodColor = Colors.green;
         moodIcon = 'sentiment_very_satisfied';
         break;
+      case 'confident':
+        moodColor = Colors.indigo;
+        moodIcon = 'thumb_up';
+        break;
       case 'sad':
         moodColor = Colors.blue;
         moodIcon = 'sentiment_very_dissatisfied';
@@ -149,13 +194,37 @@ class JournalEntryCardWidget extends StatelessWidget {
         moodColor = Colors.orange;
         moodIcon = 'sentiment_satisfied';
         break;
+      case 'angry':
+        moodColor = Colors.red;
+        moodIcon = 'sentiment_very_dissatisfied';
+        break;
+      case 'tired':
+        moodColor = Colors.deepPurple;
+        moodIcon = 'bedtime';
+        break;
+      case 'loved':
+        moodColor = Colors.pink;
+        moodIcon = 'favorite';
+        break;
       case 'calm':
         moodColor = Colors.teal;
         moodIcon = 'sentiment_neutral';
         break;
       case 'anxious':
-        moodColor = Colors.red;
+        moodColor = Colors.deepOrange;
         moodIcon = 'sentiment_dissatisfied';
+        break;
+      case 'thoughtful':
+        moodColor = Colors.blueGrey;
+        moodIcon = 'psychology';
+        break;
+      case 'peaceful':
+        moodColor = Colors.cyan;
+        moodIcon = 'self_improvement';
+        break;
+      case 'neutral':
+        moodColor = Colors.grey;
+        moodIcon = 'sentiment_neutral';
         break;
       default:
         moodColor = Colors.grey;
@@ -186,6 +255,36 @@ class JournalEntryCardWidget extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildAttachmentsRow(List<String> urls) {
+    if (urls.isEmpty) return const SizedBox.shrink();
+    return SizedBox(
+      height: 12.h,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: urls.length.clamp(0, 5),
+        separatorBuilder: (_, __) => SizedBox(width: 2.w),
+        itemBuilder: (context, index) {
+          final url = urls[index];
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: AspectRatio(
+              aspectRatio: 1.4, // landscape-ish thumbnail
+              child: Image.network(
+                url,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  color: Colors.grey.shade200,
+                  alignment: Alignment.center,
+                  child: const Icon(Icons.broken_image, size: 20),
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }

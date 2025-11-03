@@ -19,6 +19,11 @@ import '../../services/auth_service.dart';
 import '../../services/journal_service.dart';
 import '../../services/story_service.dart';
 import '../../services/sparkle_service.dart';
+import '../../services/settings_service.dart';
+import '../../services/backup_service.dart';
+import '../../services/storage_metrics_service.dart';
+import 'package:image_picker/image_picker.dart';
+import '../../services/supabase_service.dart';
 
 class JournalHomeScreen extends StatefulWidget {
   const JournalHomeScreen({Key? key}) : super(key: key);
@@ -57,17 +62,17 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
   String _storyTitle = '';
   String _storyContent = '';
   String _genre = '';
-  DateTime _creationDate = DateTime.now();
   int _wordCount = 0;
   int _readingTimeMinutes = 0;
   bool _showStoryDetail = false;
-  bool _showAllStories = false; // Add this new state variable
 
   // Profile data
   String _selectedTheme = 'System';
   bool _notificationsEnabled = true;
   bool _backupEnabled = true;
   bool _privacyMode = false;
+  String _storageSubtitle = '—';
+  DateTime? _lastBackupAt;
 
   // Replace mock data with real data from Supabase
   Map<String, dynamic>? _userData;
@@ -108,7 +113,8 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
     _filteredEntries = [];
     _filteredThoughts = [];
     _initializeAnimations();
-    _loadUserData();
+  _loadUserData();
+  _loadSettings();
     _scrollController.addListener(_updateReadingProgress);
 
     // Listen to auth state changes
@@ -120,6 +126,26 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
         }
       }
     });
+  }
+
+  Future<void> _loadSettings() async {
+    try {
+      await SettingsService.instance.load();
+      if (!mounted) return;
+      setState(() {
+        _privacyMode = SettingsService.instance.privacyMode;
+        _backupEnabled = SettingsService.instance.autoBackupEnabled;
+        _lastBackupAt = SettingsService.instance.lastBackupAt;
+      });
+      SettingsService.instance.onChanged.listen((_) {
+        if (!mounted) return;
+        setState(() {
+          _privacyMode = SettingsService.instance.privacyMode;
+          _backupEnabled = SettingsService.instance.autoBackupEnabled;
+          _lastBackupAt = SettingsService.instance.lastBackupAt;
+        });
+      });
+    } catch (_) {}
   }
 
   @override
@@ -154,6 +180,166 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
         _profileAnimationController.forward();
       }
     });
+  }
+
+  void _showAvatarOptions() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_camera),
+                title: const Text('Take Photo'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _pickAndUploadAvatar(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library),
+                title: const Text('Choose from Gallery'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _pickAndUploadAvatar(ImageSource.gallery);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline),
+                title: const Text('Remove Photo'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await _removeAvatar();
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _pickAndUploadAvatar(ImageSource source) async {
+    try {
+      final picker = ImagePicker();
+      final file = await picker.pickImage(source: source, imageQuality: 85);
+      if (file == null) return;
+
+      final user = AuthService.instance.currentUser;
+      if (user == null) return;
+
+      final bytes = await file.readAsBytes();
+      final ext = file.name.split('.').last.toLowerCase();
+      final path = '${user.id}/avatar.${ext.isEmpty ? 'jpg' : ext}';
+      final storage = SupabaseService.instance.client.storage.from('avatars');
+
+      final contentType = () {
+        switch (ext) {
+          case 'png':
+            return 'image/png';
+          case 'webp':
+            return 'image/webp';
+          case 'jpg':
+          case 'jpeg':
+          default:
+            return 'image/jpeg';
+        }
+      }();
+
+      await storage.uploadBinary(
+        path,
+        bytes,
+        fileOptions: FileOptions(upsert: true, contentType: contentType),
+      );
+      final publicUrl = storage.getPublicUrl(path);
+
+      await AuthService.instance.updateUserProfile(avatarUrl: publicUrl);
+
+      final cacheBustedUrl = publicUrl + '?ts=' + DateTime.now().millisecondsSinceEpoch.toString();
+      setState(() {
+        (_userData ??= {})['avatar'] = cacheBustedUrl;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Profile photo updated')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to update photo: ${e.toString().replaceFirst('Exception: ', '')}')),
+      );
+    }
+  }
+
+  Future<void> _removeAvatar() async {
+    try {
+      final user = AuthService.instance.currentUser;
+      if (user == null) return;
+      await SupabaseService.instance.client
+          .from('user_profiles')
+          .update({
+            'avatar_url': null,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', user.id);
+      setState(() {
+        (_userData ??= {})['avatar'] = null;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Profile photo removed')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to remove photo: ${e.toString().replaceFirst('Exception: ', '')}')),
+      );
+    }
+  }
+
+  Future<void> _refreshStorageMetrics() async {
+    try {
+      final bytes = await StorageMetricsService.instance.computeTotalBytes();
+      if (!mounted) return;
+      setState(() {
+        final size = StorageMetricsService.formatBytes(bytes);
+        final entries = _journalEntries.length;
+        final last = _lastBackupAt;
+        final lastStr = last != null
+            ? ', last backup: ${last.toLocal().toString().split('.').first}'
+            : '';
+        _storageSubtitle = '$entries entries, $size$lastStr';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _storageSubtitle = '${_journalEntries.length} entries, unknown size';
+      });
+    }
+  }
+
+  Future<void> _backupNow() async {
+    try {
+      final count = await BackupService.instance.backupAllEntries();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Backed up $count entries')),
+      );
+      await _refreshStorageMetrics();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Backup failed: $e')),
+      );
+    }
   }
 
   void _updateReadingProgress() {
@@ -306,6 +492,8 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
       if (mounted) {
         setState(() => _isLoadingData = false);
       }
+      // Refresh storage metrics once data is loaded
+      await _refreshStorageMetrics();
     } catch (error) {
       debugPrint('Error in _loadUserData: $error');
       if (mounted) {
@@ -327,17 +515,22 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
     await _loadUserData();
   }
 
-  void _navigateToStoryGeneration(Map<String, dynamic> entry) {
-  Navigator.pushNamed(context, AppRoutes.storyGenerationScreen, arguments: entry);
+  Future<void> _navigateToStoryGeneration(Map<String, dynamic> entry) async {
+    await Navigator.pushNamed(
+      context,
+      AppRoutes.storyGenerationScreen,
+      arguments: entry,
+    );
+    if (!mounted) return;
+    // After returning from generation, refresh data and go back to Home
+    await _loadUserData();
+    setState(() {
+      _showStoryDetail = false;
+    });
+    _tabController.animateTo(0);
   }
 
-  void _navigateToStoryLibrary() {
-  Navigator.pushNamed(context, AppRoutes.storyLibraryScreen);
-  }
-
-  void _navigateToProfile() {
-    Navigator.pushNamed(context, AppRoutes.userProfileScreen);
-  }
+  
 
   void _editEntry(Map<String, dynamic> entry) {
     Navigator.pushNamed(context, AppRoutes.journalEntryCreation, arguments: entry);
@@ -1145,7 +1338,8 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
     );
   }
 
-  void _showStoryPopup(Map<String, dynamic> story) {
+  /* Removed unused _showStoryPopup */
+  /* void _showStoryPopup(Map<String, dynamic> story) {
     showDialog(
       context: context,
       builder: (context) => Dialog(
@@ -1319,32 +1513,9 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
         ),
       ),
     );
-  }
+  } */
 
-  Widget _buildStoryStat(String emoji, String label, String value) {
-    return Expanded(
-      child: Column(
-        children: [
-          Text(emoji, style: Theme.of(context).textTheme.titleMedium),
-          SizedBox(height: 0.5.h),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppTheme.lightTheme.colorScheme.onSurface.withValues(
-                    alpha: 0.7,
-                  ),
-                ),
-          ),
-          Text(
-            value,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
-          ),
-        ],
-      ),
-    );
-  }
+  
 
   void _openStoryDetail(Map<String, dynamic> story) {
     setState(() {
@@ -1354,7 +1525,6 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
       _storyTitle = story['title'] ?? 'Generated Story';
       _storyContent = story['content'] ?? _currentStory['content'];
       _genre = story['genre'] ?? 'Fantasy';
-      _creationDate = story['creationDate'] ?? DateTime.now();
       _wordCount = story['wordCount'] ?? 342;
       _readingTimeMinutes = story['readingTimeMinutes'] ?? 3;
       _rating = story['rating'] ?? 0; // default to unrated
@@ -1447,8 +1617,15 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
     );
   }
 
-  void _createNewStoryVersion() {
-  Navigator.pushNamed(context, AppRoutes.storyGenerationScreen);
+  Future<void> _createNewStoryVersion() async {
+    await Navigator.pushNamed(context, AppRoutes.storyGenerationScreen);
+    if (!mounted) return;
+    // Ensure UI reflects the latest state: close detail, refresh, back to Home
+    await _loadUserData();
+    setState(() {
+      _showStoryDetail = false;
+    });
+    _tabController.animateTo(0);
   }
 
   void _onRelatedStoryTap(Map<String, dynamic> story) {
@@ -1471,13 +1648,7 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
     );
   }
 
-  void _exportStory(String format) {
-    Fluttertoast.showToast(
-      msg: "Exporting story as ${format.toUpperCase()}...",
-      toastLength: Toast.LENGTH_SHORT,
-      gravity: ToastGravity.BOTTOM,
-    );
-  }
+  
 
   void _deleteStory() {
     showDialog(
@@ -1533,32 +1704,7 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
     );
   }
 
-  void _toggleShowAllStories() {
-    setState(() {
-      _showAllStories = !_showAllStories;
-    });
-  }
-
-  void _addNewThought() async {
-    if (_thoughtController.text.trim().isNotEmpty) {
-      try {
-        await SparkleService.instance.createSparkle(
-          content: _thoughtController.text.trim(),
-        );
-        _thoughtController.clear();
-        await _loadUserData(); // Refresh data
-        Fluttertoast.showToast(
-          msg: "Sparkle added successfully",
-          toastLength: Toast.LENGTH_SHORT,
-          gravity: ToastGravity.BOTTOM,
-        );
-      } catch (error) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to add thought: $error')),
-        );
-      }
-    }
-  }
+  
 
   void _filterThoughts(String query) {
     setState(() {
@@ -1636,7 +1782,7 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
               ),
               SizedBox(height: 1.5.h),
               DropdownButtonFormField<String>(
-                value: selectedCategory,
+                initialValue: selectedCategory,
                 decoration: InputDecoration(
                   labelText: 'Category',
                   border: OutlineInputBorder(
@@ -1734,7 +1880,7 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
             ),
             SizedBox(height: 2.h),
             DropdownButtonFormField<String>(
-              value: selectedCategory,
+              initialValue: selectedCategory,
               decoration: InputDecoration(
                 labelText: 'Category',
                 border: OutlineInputBorder(
@@ -2505,6 +2651,7 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
                                 onTransform: () =>
                                     _navigateToStoryGeneration(entry),
                                 onDelete: () => _deleteEntry(entry),
+                                privacyMode: _privacyMode,
                               ),
                             );
                           }, childCount: _filteredEntries.length),
@@ -2747,7 +2894,7 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
                   // Profile Header - Using real user data
                   ProfileHeaderWidget(
                     userData: _userData ?? {},
-                    onAvatarTap: _navigateToEditProfile,
+                    onAvatarTap: _showAvatarOptions,
                   ),
 
                   SizedBox(height: 3.h),
@@ -2838,10 +2985,11 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
                         'Hide entries from quick preview',
                         'visibility_off',
                         _privacyMode,
-                        (value) {
+                        (value) async {
                           setState(() {
                             _privacyMode = value;
                           });
+                          await SettingsService.instance.setPrivacyMode(value);
                         },
                       ),
                     ],
@@ -2857,17 +3005,28 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
                         'Automatically backup your data',
                         'backup',
                         _backupEnabled,
-                        (value) {
+                        (value) async {
                           setState(() {
                             _backupEnabled = value;
                           });
+                          await SettingsService.instance.setAutoBackupEnabled(value);
                         },
                       ),
                       _buildSettingsTile(
+                        'Backup Now',
+                        _lastBackupAt != null
+                            ? 'Last backup: ${_lastBackupAt!.toLocal().toString().split('.').first}'
+                            : 'Never backed up',
+                        'settings_backup_restore',
+                        _backupNow,
+                      ),
+                      _buildSettingsTile(
                         'Storage',
-                        '${_userData?['total_entries'] ?? 0} entries, 2.4 MB',
+                        _storageSubtitle.isNotEmpty
+                            ? _storageSubtitle
+                            : '${_journalEntries.length} entries',
                         'storage',
-                        () {},
+                        _refreshStorageMetrics,
                       ),
                       _buildSettingsTile(
                         'About Joyce\'s.ink',
@@ -3217,97 +3376,9 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
 
   // Removed legacy Delete Account and subscription modal widgets
 
-  Widget _buildStatCard(String label, String value) {
-    return Container(
-      padding: EdgeInsets.all(4.w),
-      decoration: BoxDecoration(
-        color: AppTheme.lightTheme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.lightTheme.dividerColor, width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.shadowLight.withValues(alpha: 0.15),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
-            spreadRadius: 2,
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.lightTheme.colorScheme.primary,
-                ),
-          ),
-          SizedBox(height: 0.5.h),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppTheme.lightTheme.colorScheme.onSurface.withValues(
-                    alpha: 0.7,
-                  ),
-                ),
-          ),
-        ],
-      ),
-    );
-  }
+  
 
-  Widget _buildProfileOption(
-    String title,
-    String iconName,
-    VoidCallback onTap,
-  ) {
-    return Container(
-      margin: EdgeInsets.only(bottom: 2.h),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.shadowLight.withValues(alpha: 0.12),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-            spreadRadius: 2,
-          ),
-        ],
-      ),
-      child: ListTile(
-        leading: Container(
-          padding: EdgeInsets.all(3.w),
-          decoration: BoxDecoration(
-            color: AppTheme.lightTheme.colorScheme.primary.withValues(
-              alpha: 0.1,
-            ),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: CustomIconWidget(
-            iconName: iconName,
-            color: AppTheme.lightTheme.colorScheme.primary,
-            size: 5.w,
-          ),
-        ),
-        title: Text(
-          title,
-          style: Theme.of(
-            context,
-          ).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w500),
-        ),
-        trailing: CustomIconWidget(
-          iconName: 'chevron_right',
-          color: AppTheme.lightTheme.colorScheme.onSurface.withValues(
-            alpha: 0.5,
-          ),
-          size: 5.w,
-        ),
-        onTap: onTap,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        tileColor: AppTheme.lightTheme.colorScheme.surface,
-      ),
-    );
-  }
+  
 
   Widget _buildNoSearchResults() {
     return Center(

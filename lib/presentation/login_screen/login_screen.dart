@@ -217,7 +217,7 @@ class _LoginScreenState extends State<LoginScreen>
                       Container(
                         padding: EdgeInsets.all(6.w),
                         decoration: BoxDecoration(
-                          color: AppTheme.lightTheme.colorScheme.surface,
+                          color: Colors.white, // Avatar frame background set to pure white
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(

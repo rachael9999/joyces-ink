@@ -6,6 +6,7 @@ import '../core/app_export.dart';
 import './services/payment_service.dart';
 import './services/auth_service.dart';
 import './services/supabase_service.dart';
+import './services/settings_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,6 +20,11 @@ void main() async {
   try {
     // Initialize Supabase
     await SupabaseService.initialize();
+
+    // Load persisted app settings (privacy mode, auto-backup, last backup)
+    try {
+      await SettingsService.instance.load();
+    } catch (_) {}
 
     // Initialize Stripe (only if keys are available)
     try {
