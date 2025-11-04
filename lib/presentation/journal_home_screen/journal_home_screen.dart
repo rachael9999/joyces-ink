@@ -24,6 +24,7 @@ import '../../services/backup_service.dart';
 import '../../services/storage_metrics_service.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../services/supabase_service.dart';
+import '../mood_dots/mood_dots_page.dart';
 
 class JournalHomeScreen extends StatefulWidget {
   const JournalHomeScreen({Key? key}) : super(key: key);
@@ -528,6 +529,15 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
       _showStoryDetail = false;
     });
     _tabController.animateTo(0);
+  }
+
+  void _openMoodDotsPage() {
+    if (!mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MoodDotsPage(entries: _journalEntries),
+      ),
+    );
   }
 
   
@@ -2052,6 +2062,23 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
                         ),
                       ),
                     ),
+                  SizedBox(width: 2.w),
+                  // Quick access to Mood Dots (desktop-friendly)
+                  GestureDetector(
+                    onTap: _openMoodDotsPage,
+                    child: Container(
+                      padding: EdgeInsets.all(2.w),
+                      decoration: BoxDecoration(
+                        color: AppTheme.lightTheme.colorScheme.surface,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: CustomIconWidget(
+                        iconName: 'calendar_view_month',
+                        color: AppTheme.lightTheme.colorScheme.onSurface,
+                        size: 6.w,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -2085,6 +2112,7 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
             Expanded(
               child: TabBarView(
                 controller: _tabController,
+                physics: const NeverScrollableScrollPhysics(),
                 children: [
                   // Journal Tab
                   _buildJournalTab(),
@@ -2565,7 +2593,13 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
       return const Center(child: CircularProgressIndicator());
     }
 
-    return RefreshIndicator(
+    // Right-edge swipe zone using Scale callbacks to avoid gesture conflicts
+    double _edgeAccumDx = 0.0;
+    bool _edgePinch = false;
+
+    return Stack(
+      children: [
+        RefreshIndicator(
       onRefresh: _refreshEntries,
       child: _filteredEntries.isEmpty && _journalEntries.isNotEmpty
           ? _buildNoSearchResults()
@@ -2661,6 +2695,37 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
                     ],
                   ),
                 ),
+        ),
+        // Right edge gesture capture (doesn't block vertical scrolling)
+        Align(
+          alignment: Alignment.centerRight,
+          child: SizedBox(
+            width: 36, // swipe zone width
+            height: double.infinity,
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onScaleStart: (_) {
+                _edgeAccumDx = 0.0;
+                _edgePinch = false;
+              },
+              onScaleUpdate: (d) {
+                if (d.pointerCount >= 2) {
+                  _edgePinch = true; // ignore pinch here
+                } else {
+                  _edgeAccumDx += d.focalPointDelta.dx;
+                }
+              },
+              onScaleEnd: (d) {
+                if (_edgePinch) return; // no-op for pinch on home
+                final vx = d.velocity.pixelsPerSecond.dx;
+                if (vx < -400 || _edgeAccumDx < -80) {
+                  _openMoodDotsPage();
+                }
+              },
+            ),
+          ),
+        ),
+      ],
     );
   }
 
