@@ -12,6 +12,48 @@ class PaymentService {
   final Dio _dio = Dio();
   final String _baseUrl = '${SupabaseService.supabaseUrl}/functions/v1';
 
+  // Configurable trial days (from dart-define), default to 7
+  static int get trialDays {
+    final raw = const String.fromEnvironment('TRIAL_DAYS', defaultValue: '7');
+    final parsed = int.tryParse(raw);
+    return (parsed == null || parsed <= 0) ? 7 : parsed;
+  }
+
+  // Client-side defaults in case the backend table is not available
+  List<SubscriptionPlan> get _defaultPlans => [
+        SubscriptionPlan(
+          id: 'default_monthly',
+          name: 'Premium Monthly',
+          description: 'Full premium access billed monthly',
+          price: 4.99,
+          currency: 'USD',
+          billingInterval: 'month',
+          features: const [
+            'Unlimited AI Story Generation',
+            'Advanced Cloud Sync',
+            'Premium Themes & Analytics',
+            'Priority Export & Support',
+          ],
+          isActive: true,
+        ),
+        SubscriptionPlan(
+          id: 'default_yearly',
+          name: 'Premium Yearly',
+          description: 'Best value billed annually',
+          price: 39.99,
+          currency: 'USD',
+          billingInterval: 'year',
+          features: const [
+            'Unlimited AI Story Generation',
+            'Advanced Cloud Sync',
+            'Premium Themes & Analytics',
+            'Priority Export & Support',
+            'Save over monthly',
+          ],
+          isActive: true,
+        ),
+      ];
+
   /// Initialize Stripe with publishable key
   static Future<void> initialize() async {
     try {
@@ -74,6 +116,9 @@ class PaymentService {
             'Authorization': 'Bearer ${session.accessToken}',
             'Content-Type': 'application/json',
           },
+          // Help diagnose CORS/network on web
+          sendTimeout: const Duration(seconds: 20),
+          receiveTimeout: const Duration(seconds: 30),
         ),
       );
 
@@ -86,17 +131,28 @@ class PaymentService {
     } on DioException catch (e) {
       String errorMessage = 'Network error occurred';
 
-      if (e.response?.data != null) {
-        if (e.response?.data['error'] != null) {
-          errorMessage = 'Payment error: ${e.response?.data['error']}';
-        } else {
-          errorMessage =
-              'Server error: ${e.response?.statusMessage ?? 'Unknown error'}';
-        }
+      final code = e.response?.statusCode;
+      final body = e.response?.data;
+      final status = e.response?.statusMessage;
+
+      if (body is Map && body['error'] != null) {
+        errorMessage = 'Payment error: ${body['error']}';
+      } else if (code != null) {
+        errorMessage = 'Server error ($code): ${status ?? 'Unknown'}';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout) {
+        errorMessage = 'Network timeout. Please try again.';
       } else if (e.message?.contains('SocketException') == true) {
         errorMessage = 'No internet connection. Please check your network.';
+      } else if (e.type == DioExceptionType.badCertificate) {
+        errorMessage = 'Bad SSL certificate. Check your network or VPN.';
+      } else if (e.type == DioExceptionType.badResponse) {
+        errorMessage = 'Unexpected server response.';
       }
 
+      if (kDebugMode) {
+        print('createSubscriptionPayment error: ${e.toString()}');
+      }
       throw Exception(errorMessage);
     } catch (e) {
       if (e.toString().contains('Exception:')) {
@@ -193,14 +249,18 @@ class PaymentService {
           .eq('is_active', true)
           .order('price');
 
-      return (response as List)
+      final list = (response as List)
           .map((plan) => SubscriptionPlan.fromJson(plan))
           .toList();
+
+      if (list.isEmpty) return _defaultPlans;
+      return list;
     } catch (e) {
       if (kDebugMode) {
         print('Error fetching subscription plans: $e');
       }
-      return [];
+      // Fallback to defaults if table missing or any error occurs
+      return _defaultPlans;
     }
   }
 
@@ -224,6 +284,89 @@ class PaymentService {
       if (kDebugMode) {
         print('Error canceling subscription: $e');
       }
+      return false;
+    }
+  }
+
+  /// Ensure there's an active subscription record for the current user.
+  /// This is a safety net in case the backend does not create the record.
+  /// Returns true if a valid active record exists or was created.
+  Future<bool> ensureSubscriptionRecord({
+    required String subscriptionPlanId,
+    String? billingInterval,
+  }) async {
+    try {
+      final client = SupabaseService.instance.client;
+      final user = client.auth.currentUser;
+      if (user == null) return false;
+
+      // If already has an active subscription, nothing to do
+      final existing = await client
+          .from('user_subscriptions')
+          .select('id,status')
+          .eq('user_id', user.id)
+          .eq('status', 'active')
+          .maybeSingle();
+      if (existing != null) return true;
+
+      // Determine interval: prefer provided value, else try DB, else infer
+      String interval = billingInterval ?? 'month';
+      int? planTrialDays;
+      if (billingInterval == null) {
+        try {
+          final planResp = await client
+              .from('subscription_plans')
+              .select('id,billing_interval,trial_days')
+              .eq('id', subscriptionPlanId)
+              .maybeSingle();
+          if (planResp != null) {
+            interval = planResp['billing_interval'] ?? interval;
+            if (planResp['trial_days'] is int) {
+              planTrialDays = planResp['trial_days'] as int;
+            }
+          } else if (subscriptionPlanId.contains('year')) {
+            interval = 'year';
+          }
+        } catch (_) {
+          // table may not exist; infer from id
+          if (subscriptionPlanId.contains('year')) interval = 'year';
+        }
+      }
+      final now = DateTime.now().toUtc();
+      DateTime periodEnd;
+      if (interval == 'year') {
+        periodEnd = DateTime.utc(now.year + 1, now.month, now.day,
+            now.hour, now.minute, now.second);
+      } else {
+        // default monthly
+        final int year = now.year + ((now.month + 1) > 12 ? 1 : 0);
+        final int month = ((now.month) % 12) + 1;
+        periodEnd = DateTime.utc(year, month, now.day,
+            now.hour, now.minute, now.second);
+      }
+
+  // Trial window (configurable): prefer plan-specific, else dart-define
+  final trialStart = now;
+  final trialEnd = now.add(Duration(days: planTrialDays ?? trialDays));
+
+      await client.from('user_subscriptions').insert({
+        'user_id': user.id,
+        'subscription_plan_id': subscriptionPlanId,
+        'status': 'active',
+        'current_period_start': now.toIso8601String(),
+        'current_period_end': periodEnd.toIso8601String(),
+        'trial_start': trialStart.toIso8601String(),
+        'trial_end': trialEnd.toIso8601String(),
+        'created_at': now.toIso8601String(),
+        'updated_at': now.toIso8601String(),
+      });
+
+      return true;
+    } catch (e) {
+      if (kDebugMode) {
+        print('ensureSubscriptionRecord error: $e');
+      }
+      // Best-effort: if insert failed due to constraint or RLS, treat as not ensured
       return false;
     }
   }

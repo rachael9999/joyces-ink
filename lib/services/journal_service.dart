@@ -1,4 +1,5 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../core/text_metrics.dart';
 
 import './auth_service.dart';
@@ -6,6 +7,8 @@ import './supabase_service.dart';
 import 'dart:typed_data';
 import './settings_service.dart';
 import './backup_service.dart';
+import './env_service.dart';
+import './journal_local_repository.dart';
 
 class JournalService {
   static JournalService? _instance;
@@ -14,6 +17,7 @@ class JournalService {
   JournalService._();
 
   SupabaseClient get _client => SupabaseService.instance.client;
+  bool get _useSqlite => EnvService.useSqlite && !kIsWeb;
 
   // Mood: UI now provides exact DB enum values; no mapping here.
 
@@ -23,6 +27,12 @@ class JournalService {
     String? searchQuery,
   }) async {
     try {
+      if (_useSqlite) {
+        return await JournalLocalRepository.instance.getJournalEntries(
+          limit: limit,
+          searchQuery: searchQuery,
+        );
+      }
       final userId = AuthService.instance.currentUser?.id;
       if (userId == null) throw Exception('User not authenticated');
 
@@ -79,6 +89,16 @@ class JournalService {
     required String mood,
   }) async {
     try {
+      if (_useSqlite) {
+        final created = await JournalLocalRepository.instance.createJournalEntry(
+          title: title,
+          content: content,
+          preview: preview,
+          mood: mood,
+        );
+        // No remote stats; return created
+        return created;
+      }
       final userId = AuthService.instance.currentUser?.id;
       if (userId == null) throw Exception('User not authenticated');
 
@@ -130,6 +150,17 @@ class JournalService {
     String? createdAt,
   }) async {
     try {
+      if (_useSqlite) {
+        return await JournalLocalRepository.instance.updateJournalEntry(
+          entryId: entryId,
+          title: title,
+          content: content,
+          preview: preview,
+          mood: mood,
+          isFavorite: isFavorite,
+          createdAt: createdAt,
+        );
+      }
       final userId = AuthService.instance.currentUser?.id;
       if (userId == null) throw Exception('User not authenticated');
 
@@ -173,6 +204,10 @@ class JournalService {
   // Delete journal entry
   Future<void> deleteJournalEntry(String entryId) async {
     try {
+      if (_useSqlite) {
+        await JournalLocalRepository.instance.deleteJournalEntry(entryId);
+        return;
+      }
       final userId = AuthService.instance.currentUser?.id;
       if (userId == null) throw Exception('User not authenticated');
 
@@ -192,6 +227,9 @@ class JournalService {
   // Get single journal entry
   Future<Map<String, dynamic>?> getJournalEntry(String entryId) async {
     try {
+      if (_useSqlite) {
+        return await JournalLocalRepository.instance.getJournalEntry(entryId);
+      }
       final userId = AuthService.instance.currentUser?.id;
       if (userId == null) throw Exception('User not authenticated');
 
@@ -219,6 +257,13 @@ class JournalService {
     String contentType = 'image/jpeg',
   }) async {
     try {
+      if (_useSqlite) {
+        return await JournalLocalRepository.instance.saveAttachmentBytes(
+          bytes: bytes,
+          entryId: entryId,
+          fileName: fileName,
+        );
+      }
       final userId = AuthService.instance.currentUser?.id;
       if (userId == null) throw Exception('User not authenticated');
 
@@ -242,6 +287,12 @@ class JournalService {
     required List<String> urls,
   }) async {
     try {
+      if (_useSqlite) {
+        return await JournalLocalRepository.instance.replaceEntryAttachments(
+          entryId: entryId,
+          urls: urls,
+        );
+      }
       final userId = AuthService.instance.currentUser?.id;
       if (userId == null) throw Exception('User not authenticated');
 
@@ -390,6 +441,10 @@ class JournalService {
 
   // Subscribe to real-time journal entries changes
   RealtimeChannel subscribeToJournalEntries() {
+    if (_useSqlite) {
+      // Not available in local mode
+      throw UnimplementedError('Realtime subscription is not available in local SQLite mode.');
+    }
     return _client
         .channel('journal_entries_changes')
         .onPostgresChanges(

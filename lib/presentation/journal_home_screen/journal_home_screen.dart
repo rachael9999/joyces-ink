@@ -22,6 +22,8 @@ import '../../services/sparkle_service.dart';
 import '../../services/settings_service.dart';
 import '../../services/backup_service.dart';
 import '../../services/storage_metrics_service.dart';
+import '../../services/subscription_service.dart';
+import '../../services/payment_service.dart' as pay;
 import 'package:image_picker/image_picker.dart';
 import '../../services/supabase_service.dart';
 import '../mood_dots/mood_dots_page.dart';
@@ -58,6 +60,62 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
   // Story Detail State
   bool _isEditingStory = false;
   bool _isFavorite = false;
+  String _selectedBillingPeriod = 'Monthly';
+
+  Future<Map<String, dynamic>> _computeUsageStats() async {
+    final plan = await SubscriptionService.instance.getCurrentPlan();
+    final limits = SubscriptionService.instance.limitsFor(plan);
+
+    // Stories generated (approximate count with a safe upper bound)
+    int storiesCount = 0;
+    try {
+      final stories = await StoryService.instance.getGeneratedStories(limit: 1000);
+      storiesCount = stories.length;
+    } catch (_) {}
+
+    // Storage bytes
+    int usedBytes = 0;
+    try {
+      usedBytes = await StorageMetricsService.instance.computeTotalBytes();
+    } catch (_) {}
+
+    // Build labels and progress
+    String storiesLabel;
+    double storiesProgress;
+    if (limits.maxStoriesGenerated == null) {
+      storiesLabel = 'Unlimited';
+      storiesProgress = 1.0;
+    } else {
+      final max = limits.maxStoriesGenerated!.toDouble();
+      storiesLabel = '$storiesCount/${limits.maxStoriesGenerated}';
+      storiesProgress = (storiesCount / max).clamp(0.0, 1.0);
+    }
+
+    String storageLabel;
+    double storageProgress;
+    if (limits.maxStorageBytes == null) {
+      storageLabel = '${StorageMetricsService.formatBytes(usedBytes)} / Unlimited';
+      storageProgress = 1.0;
+    } else {
+      final maxBytes = limits.maxStorageBytes!.toDouble();
+      storageLabel = '${StorageMetricsService.formatBytes(usedBytes)} / ${StorageMetricsService.formatBytes(limits.maxStorageBytes!)}';
+      storageProgress = (usedBytes / maxBytes).clamp(0.0, 1.0);
+    }
+
+    const int totalFormats = 2;
+    final int allowed = limits.allowedExportFormats;
+    final String formatsLabel = '${allowed}/$totalFormats';
+    final double formatsProgress = (allowed / totalFormats).clamp(0.0, 1.0);
+
+    return {
+      'storiesLabel': storiesLabel,
+      'storiesProgress': storiesProgress,
+      'storageLabel': storageLabel,
+      'storageProgress': storageProgress,
+      'formatsLabel': formatsLabel,
+      'formatsProgress': formatsProgress,
+    };
+  }
   int _rating = 0;
   double _readingProgress = 0.0;
   String _storyTitle = '';
@@ -973,14 +1031,21 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
                             .headlineSmall
                             ?.copyWith(fontWeight: FontWeight.w700),
                       ),
-                      Text(
-                        'Currently on Free Plan',
-                        style: Theme.of(
-                          context,
-                        ).textTheme.bodyMedium?.copyWith(
-                              color: AppTheme.lightTheme.colorScheme.onSurface
-                                  .withValues(alpha: 0.7),
-                            ),
+                      FutureBuilder<SubscriptionPlan>(
+                        future: SubscriptionService.instance.getCurrentPlan(),
+                        builder: (context, snapshot) {
+                          final plan = snapshot.data;
+                          final planText = plan == SubscriptionPlan.premium
+                              ? 'Currently on Premium Plan'
+                              : 'Currently on Free Plan';
+          return Text(
+            planText,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: AppTheme.lightTheme.colorScheme.onSurface
+              .withOpacity(0.7),
+            ),
+          );
+                        },
                       ),
                     ],
                   ),
@@ -988,6 +1053,59 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
               ),
 
               SizedBox(height: 3.h),
+
+              // Success banner if subscription is active
+              FutureBuilder<pay.UserSubscription?>(
+                future: pay.PaymentService.instance.getCurrentSubscription(),
+                builder: (context, snapshot) {
+                  final sub = snapshot.data;
+                  if (sub == null || !sub.isActive) return const SizedBox.shrink();
+                  final trial = sub.trialEnd != null
+                      ? 'Trial until ${sub.trialEnd!.toLocal().toString().split(' ').first}'
+                      : null;
+                  final next = sub.nextBillingDate != null
+                      ? 'Next billing: ${sub.nextBillingDate!.toLocal().toString().split(' ').first}'
+                      : null;
+                  return Container(
+                    width: double.infinity,
+                    margin: EdgeInsets.only(bottom: 2.h),
+                    padding: EdgeInsets.all(3.w),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.1),
+                      border: Border.all(color: Colors.green.withOpacity(0.3)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.check_circle, color: Colors.green),
+                        SizedBox(width: 2.w),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Premium Active',
+                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.green[800],
+                                    ),
+                              ),
+                              if (trial != null || next != null)
+                                Text(
+                                  [trial, next].where((e) => e != null).join(' • '),
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: Colors.green[800],
+                                      ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
 
               // Premium Features
               Container(
@@ -997,18 +1115,14 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                     colors: [
-                      AppTheme.lightTheme.colorScheme.primary.withValues(
-                        alpha: 0.1,
-                      ),
-                      AppTheme.lightTheme.colorScheme.secondary.withValues(
-                        alpha: 0.1,
-                      ),
+                      AppTheme.lightTheme.colorScheme.primary.withOpacity(0.1),
+                      AppTheme.lightTheme.colorScheme.secondary.withOpacity(0.1),
                     ],
                   ),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
                     color: AppTheme.lightTheme.colorScheme.primary
-                        .withValues(alpha: 0.3),
+                        .withOpacity(0.3),
                   ),
                 ),
                 child: Column(
@@ -1058,28 +1172,66 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
 
               SizedBox(height: 3.h),
 
-              // Pricing Plans
-              Row(
-                children: [
-                  Expanded(
-                    child: _buildPricingCard(
-                      'Monthly',
-                      '\$4.99',
-                      '/month',
-                      false,
-                    ),
-                  ),
-                  SizedBox(width: 3.w),
-                  Expanded(
-                    child: _buildPricingCard(
-                      'Yearly',
-                      '\$39.99',
-                      '/year',
-                      true,
-                      discount: '33% OFF',
-                    ),
-                  ),
-                ],
+              // Pricing Plans (dynamic from backend, with fallback)
+              FutureBuilder<List<pay.SubscriptionPlan>>(
+                future: pay.PaymentService.instance.getSubscriptionPlans(),
+                builder: (context, snap) {
+                  final plans = snap.data ?? [];
+                  pay.SubscriptionPlan? monthly;
+                  pay.SubscriptionPlan? yearly;
+                  for (final p in plans) {
+                    if (p.billingInterval == 'month') monthly = p;
+                    if (p.billingInterval == 'year') yearly = p;
+                  }
+
+                  String monthlyPrice = monthly != null
+                      ? '\$${monthly.price.toStringAsFixed(2)}'
+                      : '\$4.99';
+                  String yearlyPrice = yearly != null
+                      ? '\$${yearly.price.toStringAsFixed(2)}'
+                      : '\$39.99';
+
+                  // Compute discount if both present
+                  String? discountLabel;
+                  if (monthly != null && yearly != null) {
+                    final monthlyAnnual = monthly.price * 12.0;
+                    if (monthlyAnnual > 0 && yearly.price < monthlyAnnual) {
+                      final save = ((monthlyAnnual - yearly.price) / monthlyAnnual) * 100.0;
+                      if (save >= 5) {
+                        discountLabel = '${save.round()}% OFF';
+                      }
+                    }
+                  }
+
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setState(() => _selectedBillingPeriod = 'Monthly'),
+                          child: _buildPricingCard(
+                            'Monthly',
+                            monthlyPrice,
+                            '/month',
+                            _selectedBillingPeriod == 'Monthly',
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: 3.w),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setState(() => _selectedBillingPeriod = 'Yearly'),
+                          child: _buildPricingCard(
+                            'Yearly',
+                            yearlyPrice,
+                            '/year',
+                            _selectedBillingPeriod == 'Yearly',
+                            discount: discountLabel,
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
 
               SizedBox(height: 3.h),
@@ -1105,9 +1257,29 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
                           ?.copyWith(fontWeight: FontWeight.w600),
                     ),
                     SizedBox(height: 2.h),
-                    _buildUsageStat('Stories Generated', '3/5', 0.6),
-                    _buildUsageStat('Cloud Storage', '2.4/5 MB', 0.48),
-                    _buildUsageStat('Export Formats', '1/2', 0.5),
+                    FutureBuilder<Map<String, dynamic>>(
+                      future: _computeUsageStats(),
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildUsageStat('Stories Generated', '—', 0.0),
+                              _buildUsageStat('Cloud Storage', '—', 0.0),
+                            ],
+                          );
+                        }
+                        final data = snapshot.data!;
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildUsageStat('Stories Generated', data['storiesLabel'] as String, (data['storiesProgress'] as num).toDouble()),
+                            _buildUsageStat('Cloud Storage', data['storageLabel'] as String, (data['storageProgress'] as num).toDouble()),
+                            _buildUsageStat('Export Formats', data['formatsLabel'] as String, (data['formatsProgress'] as num).toDouble()),
+                          ],
+                        );
+                      },
+                    ),
                   ],
                 ),
               ),
@@ -1276,9 +1448,9 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
                 period,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: isPopular
-                          ? Colors.white.withValues(alpha: 0.8)
+                          ? Colors.white.withOpacity(0.8)
                           : AppTheme.lightTheme.colorScheme.onSurface
-                              .withValues(alpha: 0.7),
+                              .withOpacity(0.7),
                     ),
               ),
             ],
@@ -1309,9 +1481,7 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
           SizedBox(height: 0.5.h),
           LinearProgressIndicator(
             value: progress,
-            backgroundColor: AppTheme.lightTheme.colorScheme.primary.withValues(
-              alpha: 0.2,
-            ),
+            backgroundColor: AppTheme.lightTheme.colorScheme.primary.withOpacity(0.2),
             valueColor: AlwaysStoppedAnimation<Color>(
               AppTheme.lightTheme.colorScheme.primary,
             ),
@@ -1321,211 +1491,22 @@ class _JournalHomeScreenState extends State<JournalHomeScreen>
     );
   }
 
+  // Dedicated subscription checkout now handled by SubscriptionScreen
+
   void _upgradeToPremiun() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Upgrade to Premium'),
-        content: const Text(
-          'This will redirect you to the payment page. Continue?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Redirecting to payment...')),
-              );
-            },
-            child: const Text('Continue'),
-          ),
-        ],
-      ),
-    );
+    final String interval = _selectedBillingPeriod.toLowerCase().startsWith('y') ? 'year' : 'month';
+    Navigator.of(context)
+        .pushNamed(AppRoutes.subscriptionScreen, arguments: {
+          'initialInterval': interval,
+        })
+        .then((_) {
+      if (!mounted) return;
+      setState(() {});
+      // Best-effort refreshes
+      _loadUserData();
+      _refreshStorageMetrics();
+    });
   }
-
-  /* Removed unused _showStoryPopup */
-  /* void _showStoryPopup(Map<String, dynamic> story) {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        backgroundColor: Colors.transparent,
-        child: Container(
-          constraints: BoxConstraints(maxHeight: 80.h),
-          decoration: BoxDecoration(
-            color: AppTheme.lightTheme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Header
-              Container(
-                padding: EdgeInsets.all(4.w),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      AppTheme.lightTheme.colorScheme.primary,
-                      AppTheme.lightTheme.colorScheme.secondary,
-                    ],
-                  ),
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(20),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    CustomIconWidget(
-                      iconName: 'auto_stories',
-                      color: Colors.white,
-                      size: 6.w,
-                    ),
-                    SizedBox(width: 3.w),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            story['title'] ?? 'Generated Story',
-                            style: Theme.of(
-                              context,
-                            ).textTheme.titleLarge?.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                          ),
-                          Text(
-                            '${story['genre'] ?? 'Fantasy'} • ${story['wordCount'] ?? 350} words',
-                            style: Theme.of(
-                              context,
-                            ).textTheme.bodySmall?.copyWith(
-                                  color: Colors.white.withValues(alpha: 0.8),
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon: CustomIconWidget(
-                        iconName: 'close',
-                        color: Colors.white,
-                        size: 6.w,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // Story Content
-              Flexible(
-                child: SingleChildScrollView(
-                  padding: EdgeInsets.all(4.w),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        story['content'] ??
-                            'Once upon a time, in a world where stories came to life from the deepest thoughts and dreams of their writers, there lived a young storyteller who discovered that every journal entry held the power to transform into something magical...',
-                        style: Theme.of(
-                          context,
-                        ).textTheme.bodyLarge?.copyWith(height: 1.6),
-                      ),
-                      SizedBox(height: 3.h),
-
-                      // Story Stats
-                      Container(
-                        padding: EdgeInsets.all(3.w),
-                        decoration: BoxDecoration(
-                          color: AppTheme.lightTheme.colorScheme.primary
-                              .withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          children: [
-                            _buildStoryStat(
-                              '📖',
-                              'Reading Time',
-                              '${(story['wordCount'] ?? 350) ~/ 250 + 1} min',
-                            ),
-                            SizedBox(width: 4.w),
-                            _buildStoryStat(
-                              '🎭',
-                              'Genre',
-                              story['genre'] ?? 'Fantasy',
-                            ),
-                            SizedBox(width: 4.w),
-                            _buildStoryStat(
-                              '⭐',
-                              'Quality',
-                              '${story['rating'] ?? 4.2}/5',
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // Action Buttons
-              Container(
-                padding: EdgeInsets.all(4.w),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () {
-                          // Copy story to clipboard
-                          Navigator.pop(context);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Story copied to clipboard'),
-                            ),
-                          );
-                        },
-                        icon: CustomIconWidget(
-                          iconName: 'content_copy',
-                          color: AppTheme.lightTheme.colorScheme.primary,
-                          size: 4.w,
-                        ),
-                        label: const Text('Copy'),
-                      ),
-                    ),
-                    SizedBox(width: 3.w),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () {
-                          // Close the sheet and switch to the Stories tab instead of opening Story Library
-                          Navigator.pop(context);
-                          _tabController.animateTo(1);
-                          setState(() {
-                            _showStoryDetail = false;
-                          });
-                        },
-                        icon: CustomIconWidget(
-                          iconName: 'library_books',
-                          color: Colors.white,
-                          size: 4.w,
-                        ),
-                        label: const Text('View All'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  } */
-
-  
 
   void _openStoryDetail(Map<String, dynamic> story) {
     setState(() {

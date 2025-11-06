@@ -7,6 +7,13 @@ import '../../core/app_export.dart';
 
 enum MoodDotsViewMode { year, month }
 
+class _DayMood {
+  final int count;
+  final String iconName;
+  final Color color;
+  const _DayMood({required this.count, required this.iconName, required this.color});
+}
+
 class MoodDotsPage extends StatefulWidget {
   final List<Map<String, dynamic>> entries;
   final DateTime initialDate;
@@ -31,19 +38,19 @@ class _MoodDotsPageState extends State<MoodDotsPage> {
   bool _pinchActive = false; // true when multi-touch gesture is active
   double _accumDx = 0.0; // accumulate single-finger horizontal movement
 
-  // Precomputed map: yyyy-mm-dd -> mood symbol
-  late final Map<String, String> _dayMoodSymbol;
+  // Precomputed map: yyyy-mm-dd -> mood icon + color (+ count)
+  late final Map<String, _DayMood> _dayMood;
 
   @override
   void initState() {
     super.initState();
     _current = DateTime(widget.initialDate.year, widget.initialDate.month);
-    _dayMoodSymbol = _computeDailyMoodSymbols(widget.entries);
+    _dayMood = _computeDailyMood(widget.entries);
   }
 
-  Map<String, String> _computeDailyMoodSymbols(List<Map<String, dynamic>> entries) {
-    // Aggregate by day and pick the last mood of the day as representative
-    final byDay = <String, String>{};
+  Map<String, _DayMood> _computeDailyMood(List<Map<String, dynamic>> entries) {
+    // Group moods per day
+    final grouped = <String, List<String>>{};
     for (final e in entries) {
       try {
         final createdRaw = e['created_at']?.toString();
@@ -51,27 +58,55 @@ class _MoodDotsPageState extends State<MoodDotsPage> {
         final dt = DateTime.tryParse(createdRaw);
         if (dt == null) continue;
         final dayKey = _keyForDate(dt);
-        final mood = (e['mood'] ?? '').toString().toLowerCase();
-        if (mood.isEmpty) continue;
-        byDay[dayKey] = _moodToSymbol(mood);
+        final mood = (e['mood'] ?? 'neutral').toString();
+        (grouped[dayKey] ??= <String>[]).add(mood);
       } catch (_) {}
     }
-    return byDay;
+    final result = <String, _DayMood>{};
+    grouped.forEach((day, moods) {
+      if (moods.length > 1) {
+        result[day] = const _DayMood(count: 2, iconName: 'star', color: Colors.amber);
+      } else {
+        final mood = moods.first;
+        final mc = _moodToIconAndColor(mood);
+        result[day] = _DayMood(count: 1, iconName: mc.$1, color: mc.$2);
+      }
+    });
+    return result;
   }
 
   String _keyForDate(DateTime d) => '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
-  String _moodToSymbol(String mood) {
-    // Map common moods to compact symbols; default to a small diamond
-    if (mood.contains('happy') || mood.contains('joy') || mood.contains('good')) return '☺';
-    if (mood.contains('sad') || mood.contains('down')) return '☹';
-    if (mood.contains('angry') || mood.contains('mad')) return '✖';
-    if (mood.contains('stressed') || mood.contains('anxious') || mood.contains('anxiety')) return '△';
-    if (mood.contains('calm') || mood.contains('peace')) return '○';
-    if (mood.contains('excited') || mood.contains('great')) return '★';
-    if (mood.contains('tired') || mood.contains('sleep')) return '▵';
-    if (mood.contains('neutral') || mood.contains('ok')) return '◦';
-    return '◆';
+  (String, Color) _moodToIconAndColor(String moodRaw) {
+    final mood = moodRaw.toLowerCase();
+    // Keep mapping consistent with journal_entry_card_widget
+    switch (mood) {
+      case 'happy':
+        return ('sentiment_very_satisfied', Colors.green);
+      case 'confident':
+        return ('thumb_up', Colors.indigo);
+      case 'sad':
+        return ('sentiment_very_dissatisfied', Colors.blue);
+      case 'excited':
+        return ('sentiment_satisfied', Colors.orange);
+      case 'angry':
+        return ('sentiment_very_dissatisfied', Colors.red);
+      case 'tired':
+        return ('bedtime', Colors.deepPurple);
+      case 'loved':
+        return ('favorite', Colors.pink);
+      case 'calm':
+        return ('sentiment_neutral', Colors.teal);
+      case 'anxious':
+        return ('sentiment_dissatisfied', Colors.deepOrange);
+      case 'thoughtful':
+        return ('psychology', Colors.blueGrey);
+      case 'peaceful':
+        return ('self_improvement', Colors.cyan);
+      case 'neutral':
+      default:
+        return ('sentiment_neutral', Colors.grey);
+    }
   }
 
   void _onScaleStart(ScaleStartDetails d) {
@@ -317,9 +352,7 @@ class _MoodDotsPageState extends State<MoodDotsPage> {
         final dayNum = index - (firstWeekday == 0 ? 6 : firstWeekday - 1) + 1;
         final inMonth = dayNum >= 1 && dayNum <= daysInMonth;
         final date = inMonth ? DateTime(year, month, dayNum) : null;
-        final symbol = date == null
-            ? ''
-            : _dayMoodSymbol[_keyForDate(date)] ?? '•';
+    final dm = date == null ? null : _dayMood[_keyForDate(date)];
 
         // Vertical wave offset
         final wave = math.sin((row * 0.9 + col * 1.1) + _verticalPhase) * _verticalAmp;
@@ -329,13 +362,19 @@ class _MoodDotsPageState extends State<MoodDotsPage> {
           child: Center(
             child: Opacity(
               opacity: inMonth ? 1.0 : 0.15,
-              child: Text(
-                inMonth ? symbol : '',
-                style: TextStyle(
-                  fontSize: mini ? 10.sp : 16.sp,
-                  color: AppTheme.lightTheme.colorScheme.onSurface,
-                ),
-              ),
+              child: dm == null
+                  ? Text(
+                      '•',
+                      style: TextStyle(
+                        fontSize: mini ? 10.sp : 16.sp,
+                        color: AppTheme.lightTheme.colorScheme.onSurface,
+                      ),
+                    )
+                  : CustomIconWidget(
+                      iconName: dm.iconName,
+                      color: dm.color,
+                      size: mini ? 10.sp : 16.sp,
+                    ),
             ),
           ),
         );

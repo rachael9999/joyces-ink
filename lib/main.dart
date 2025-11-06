@@ -6,6 +6,8 @@ import '../core/app_export.dart';
 import './services/payment_service.dart';
 import './services/auth_service.dart';
 import './services/supabase_service.dart';
+import './services/env_service.dart';
+import './services/local_db.dart';
 import './services/settings_service.dart';
 
 void main() async {
@@ -18,17 +20,25 @@ void main() async {
   }
 
   try {
-    // Initialize Supabase
-    await SupabaseService.initialize();
+    // Initialize backend(s)
+    if (EnvService.useSqlite && !kIsWeb) {
+      // Local-only mode: init SQLite, skip Supabase
+      await LocalDb.instance.init();
+    } else {
+      // Supabase cloud mode
+      await SupabaseService.initialize();
+    }
 
     // Load persisted app settings (privacy mode, auto-backup, last backup)
     try {
       await SettingsService.instance.load();
     } catch (_) {}
 
-    // Initialize Stripe (only if keys are available)
+    // Initialize Stripe (only if in Supabase mode and keys are available)
     try {
-      await PaymentService.initialize();
+      if (!EnvService.useSqlite) {
+        await PaymentService.initialize();
+      }
     } catch (e) {
       if (kDebugMode) {
         print('Stripe initialization failed: $e');

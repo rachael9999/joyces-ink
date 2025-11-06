@@ -40,6 +40,8 @@ dependencies:
   flutter_stripe_web: ^6.5.1
   google_sign_in: ^7.2.0
   sign_in_with_apple: ^7.0.1
+  sqflite: ^2.4.1
+  uuid: ^4.5.1
 
 dev_dependencies:
   flutter_test:    # CRITICAL: Required for Flutter project testing - DO NOT REMOVE

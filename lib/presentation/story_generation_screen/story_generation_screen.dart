@@ -7,7 +7,8 @@ import '../../core/app_export.dart';
 import '../../services/gemini_service.dart';
 import '../../services/journal_service.dart';
 import '../../services/story_service.dart';
-// import '../../services/share_service.dart'; // No longer auto-creating share cards on save
+import '../../services/subscription_service.dart';
+// import '../../services/share_service.dart'; 
 import './widgets/advanced_options_widget.dart';
 import './widgets/genre_selection_widget.dart';
 import './widgets/journal_entry_preview_widget.dart';
@@ -32,8 +33,6 @@ class _StoryGenerationScreenState extends State<StoryGenerationScreen>
   bool _isGenerating = false;
   bool _showProgress = false;
   bool _showStoryPreview = false;
-
-  // Generation progress (removed unused fields)
 
   // User selections
   String? _selectedGenre;
@@ -164,11 +163,43 @@ class _StoryGenerationScreenState extends State<StoryGenerationScreen>
   Future<void> _generateStory() async {
     if (_selectedGenre == null || _selectedJournalEntry == null) return;
 
+    // Subscription gating: limit story generation for free plan
+    final canGenerate = await SubscriptionService.instance.canGenerateMoreStories();
+    if (!canGenerate) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Generation Limit Reached'),
+          content: const Text(
+            'You\'ve reached the free plan limit for AI story generation. Upgrade to generate unlimited stories.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                // Open subscription modal on Journal Home if available
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Upgrade flow coming soon')),
+                );
+              },
+              child: const Text('Upgrade'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     setState(() {
       _isGenerating = true;
       _showProgress = true;
       _showStoryPreview = false;
-  // reset internal progress in manager only
+      // reset internal progress in manager only
     });
 
     HapticFeedback.mediumImpact();

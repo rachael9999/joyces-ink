@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:sizer/sizer.dart';
 
 import '../../core/app_export.dart';
 import '../../services/auth_service.dart';
 import './widgets/login_form_widget.dart';
-import './widgets/social_login_widget.dart';
+// Removed social login per request
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -176,9 +177,7 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  void _navigateToRegister() {
-    Navigator.pushNamed(context, AppRoutes.registerScreen);
-  }
+  // Registration is disabled per request
 
   void _navigateToForgotPassword() {
     Navigator.pushNamed(context, AppRoutes.forgotPasswordScreen);
@@ -294,149 +293,73 @@ class _LoginScreenState extends State<LoginScreen>
                         ),
                       ),
 
-                      SizedBox(height: 2.h),
+                      if (!kReleaseMode) ...[
+                        SizedBox(height: 2.h),
 
-                      // Demo Credentials Section
-                      Container(
-                        padding: EdgeInsets.all(4.w),
-                        decoration: BoxDecoration(
-                          color: AppTheme.lightTheme.colorScheme.primary
-                              .withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
+                        // Demo Credentials Section
+                        Container(
+                          padding: EdgeInsets.all(4.w),
+                          decoration: BoxDecoration(
                             color: AppTheme.lightTheme.colorScheme.primary
-                                .withValues(alpha: 0.3),
+                                .withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppTheme.lightTheme.colorScheme.primary
+                                  .withValues(alpha: 0.3),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  CustomIconWidget(
+                                    iconName: 'info',
+                                    color:
+                                        AppTheme.lightTheme.colorScheme.primary,
+                                    size: 4.w,
+                                  ),
+                                  SizedBox(width: 2.w),
+                                  Text(
+                                    'Demo Credentials',
+                                    style: AppTheme
+                                        .lightTheme
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                          color:
+                                              AppTheme
+                                                  .lightTheme
+                                                  .colorScheme
+                                                  .primary,
+                                        ),
+                                  ),
+                                ],
+                              ),
+                              SizedBox(height: 1.h),
+                              Text(
+                                'Premium User: sarah.johnson@joycesink.com / password123',
+                                style: AppTheme.lightTheme.textTheme.bodySmall
+                                    ?.copyWith(fontFamily: 'monospace'),
+                              ),
+                              Text(
+                                'Free User: demo@joycesink.com / demo123',
+                                style: AppTheme.lightTheme.textTheme.bodySmall
+                                    ?.copyWith(fontFamily: 'monospace'),
+                              ),
+                            ],
                           ),
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                CustomIconWidget(
-                                  iconName: 'info',
-                                  color:
-                                      AppTheme.lightTheme.colorScheme.primary,
-                                  size: 4.w,
-                                ),
-                                SizedBox(width: 2.w),
-                                Text(
-                                  'Demo Credentials',
-                                  style: AppTheme
-                                      .lightTheme
-                                      .textTheme
-                                      .titleSmall
-                                      ?.copyWith(
-                                        fontWeight: FontWeight.w600,
-                                        color:
-                                            AppTheme
-                                                .lightTheme
-                                                .colorScheme
-                                                .primary,
-                                      ),
-                                ),
-                              ],
-                            ),
-                            SizedBox(height: 1.h),
-                            Text(
-                              'Premium User: sarah.johnson@joycesink.com / password123',
-                              style: AppTheme.lightTheme.textTheme.bodySmall
-                                  ?.copyWith(fontFamily: 'monospace'),
-                            ),
-                            Text(
-                              'Free User: demo@joycesink.com / demo123',
-                              style: AppTheme.lightTheme.textTheme.bodySmall
-                                  ?.copyWith(fontFamily: 'monospace'),
-                            ),
-                          ],
-                        ),
-                      ),
 
-                      SizedBox(height: 4.h),
+                        SizedBox(height: 4.h),
+                      ],
 
-                      // Social Login Section
-                      SocialLoginWidget(
-                        onGoogleLogin: () async {
-                          if (_isLoading) return;
-                          setState(() => _isLoading = true);
-                          try {
-                            await AuthService.instance.signInWithGoogle();
-                            // On web this may redirect; on success navigate if returned
-                            if (!mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Google sign-in initiated')),
-                            );
-                            await Future.delayed(const Duration(milliseconds: 300));
-                            if (mounted) {
-                              Navigator.pushReplacementNamed(
-                                  context, AppRoutes.journalHomeScreen);
-                            }
-                          } catch (e) {
-                            if (!mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Google sign-in failed: ${e.toString()}')),
-                            );
-                          } finally {
-                            if (mounted) setState(() => _isLoading = false);
-                          }
-                        },
-                        onAppleLogin: () async {
-                          if (_isLoading) return;
-                          setState(() => _isLoading = true);
-                          try {
-                            await AuthService.instance.signInWithApple();
-                            if (!mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Apple sign-in initiated')),
-                            );
-                            await Future.delayed(const Duration(milliseconds: 300));
-                            if (mounted) {
-                              Navigator.pushReplacementNamed(
-                                  context, AppRoutes.journalHomeScreen);
-                            }
-                          } catch (e) {
-                            if (!mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Apple sign-in failed: ${e.toString()}')),
-                            );
-                          } finally {
-                            if (mounted) setState(() => _isLoading = false);
-                          }
-                        },
-                      ),
+                      // Social login hidden per request
 
                       SizedBox(height: 6.h),
 
-                      // Sign Up Link
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            'New to our creative world? ',
-                            style: AppTheme.lightTheme.textTheme.bodyMedium
-                                ?.copyWith(
-                                  color: AppTheme
-                                      .lightTheme
-                                      .colorScheme
-                                      .onSurface
-                                      .withValues(alpha: 0.7),
-                                ),
-                          ),
-                          GestureDetector(
-                            onTap: _navigateToRegister,
-                            child: Text(
-                              'Join us',
-                              style: AppTheme.lightTheme.textTheme.bodyMedium
-                                  ?.copyWith(
-                                    color:
-                                        AppTheme.lightTheme.colorScheme.primary,
-                                    fontWeight: FontWeight.w600,
-                                    decoration: TextDecoration.underline,
-                                  ),
-                            ),
-                          ),
-                        ],
-                      ),
+                      // Registration link hidden per request
 
                       SizedBox(height: 4.h),
                     ],

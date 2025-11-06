@@ -63,6 +63,21 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
         _currentSubscription = currentSub;
         _isLoading = false;
       });
+
+      // Preselect plan by initial interval if provided via route arguments
+      if (_selectedPlan == null) {
+        final args = ModalRoute.of(context)?.settings.arguments;
+        if (args is Map && args['initialInterval'] is String) {
+          final String interval = (args['initialInterval'] as String).toLowerCase();
+          final SubscriptionPlan match = plans.firstWhere(
+            (p) => p.billingInterval.toLowerCase() == interval,
+            orElse: () => plans.first,
+          );
+          setState(() {
+            _selectedPlan = match;
+          });
+        }
+      }
     } catch (e) {
       setState(() {
         _errorMessage = 'Failed to load subscription data: $e';
@@ -137,6 +152,14 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
       );
 
       if (result.success) {
+        // Ensure subscription record exists in Supabase (safety net)
+        try {
+          await PaymentService.instance.ensureSubscriptionRecord(
+            subscriptionPlanId: _selectedPlan!.id,
+            billingInterval: _selectedPlan!.billingInterval,
+          );
+        } catch (_) {}
+
         setState(() {
           _message = result.message;
           _errorMessage = null;
@@ -226,13 +249,15 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
         backgroundColor: Theme.of(context).primaryColor,
         foregroundColor: Colors.white,
       ),
-      body: _isLoading
-          ? Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+      body: Stack(
+        children: [
+          _isLoading
+              ? Center(child: CircularProgressIndicator())
+              : SingleChildScrollView(
+                  padding: EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                   // Platform indicator for development
                   if (kDebugMode)
                     Container(
@@ -258,17 +283,17 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                       ),
                     ),
 
-                  // Current subscription status
-                  if (_currentSubscription != null)
-                    CurrentSubscriptionWidget(
-                      subscription: _currentSubscription!,
-                      onCancel: _cancelSubscription,
-                    ),
+                      // Current subscription status
+                      if (_currentSubscription != null)
+                        CurrentSubscriptionWidget(
+                          subscription: _currentSubscription!,
+                          onCancel: _cancelSubscription,
+                        ),
 
                   SizedBox(height: 24),
 
-                  // Subscription plans
-                  Text(
+                      // Subscription plans
+                      Text(
                     _currentSubscription?.isActive == true
                         ? 'Change Plan'
                         : 'Choose Your Plan',
@@ -276,8 +301,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                   ),
                   SizedBox(height: 16),
 
-                  // Plans list
-                  ..._plans.map((plan) => Padding(
+                      // Plans list
+                      ..._plans.map((plan) => Padding(
                         padding: EdgeInsets.only(bottom: 16),
                         child: SubscriptionPlanCard(
                           plan: plan,
@@ -291,29 +316,70 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
 
                   SizedBox(height: 24),
 
-                  // Payment form
-                  if (_selectedPlan != null) ...[
-                    PaymentFormWidget(
-                      formKey: _formKey,
-                      nameController: _nameController,
-                      emailController: _emailController,
-                      phoneController: _phoneController,
-                      addressLine1Controller: _addressLine1Controller,
-                      cityController: _cityController,
-                      stateController: _stateController,
-                      zipCodeController: _zipCodeController,
-                      selectedPlan: _selectedPlan!,
-                      isProcessing: _isProcessingPayment,
-                      message: _message,
-                      errorMessage: _errorMessage,
-                      onPayment: _processPayment,
-                    ),
-                  ],
+                      // Payment form
+                      if (_selectedPlan != null) ...[
+                        PaymentFormWidget(
+                          formKey: _formKey,
+                          nameController: _nameController,
+                          emailController: _emailController,
+                          phoneController: _phoneController,
+                          addressLine1Controller: _addressLine1Controller,
+                          cityController: _cityController,
+                          stateController: _stateController,
+                          zipCodeController: _zipCodeController,
+                          selectedPlan: _selectedPlan!,
+                          isProcessing: _isProcessingPayment,
+                          message: _message,
+                          errorMessage: _errorMessage,
+                          onPayment: _processPayment,
+                        ),
+                      ],
 
-                  SizedBox(height: 32),
-                ],
+                      SizedBox(height: 32),
+                    ],
+                  ),
+                ),
+
+          // Loading overlay during processing
+          if (_isProcessingPayment) ...[
+            Positioned.fill(
+              child: AbsorbPointer(
+                absorbing: true,
+                child: Container(
+                  color: Colors.black.withOpacity(0.3),
+                ),
               ),
             ),
+            Center(
+              child: Container(
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 12,
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    SizedBox(width: 12),
+                    Text(_message ?? 'Processing…'),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 

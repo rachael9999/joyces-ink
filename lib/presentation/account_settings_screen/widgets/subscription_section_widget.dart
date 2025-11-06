@@ -45,7 +45,7 @@ class _SubscriptionSectionWidgetState extends State<SubscriptionSectionWidget> {
             _buildFeature('No ads'),
             SizedBox(height: 2.h),
             Text(
-              '\$9.99/month',
+              '\$4.99/month',
               style: GoogleFonts.inter(
                 fontSize: 18.sp,
                 fontWeight: FontWeight.w700,

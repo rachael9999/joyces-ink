@@ -6,6 +6,7 @@ import 'package:sizer/sizer.dart';
 import '../../core/app_export.dart';
 import '../../core/text_metrics.dart';
 import '../../services/journal_service.dart';
+import '../../services/subscription_service.dart';
 import './widgets/mood_selector_widget.dart';
 import './widgets/photo_attachment_widget.dart';
 import './widgets/text_editor_widget.dart';
@@ -267,6 +268,43 @@ class _JournalEntryCreationState extends State<JournalEntryCreation>
       return;
     }
 
+    // Subscription gating: estimate additional storage from attachments
+    try {
+      int additionalBytes = 0;
+      for (final photo in _attachedPhotos) {
+        try {
+          additionalBytes += await photo.length();
+        } catch (_) {}
+      }
+      final canStore = await SubscriptionService.instance
+          .canStoreMoreData(additionalBytes: additionalBytes);
+      if (!canStore) {
+        if (!mounted) return;
+        await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Storage Limit Reached'),
+            content: const Text(
+              'You\'ve reached the free plan storage limit. Remove some attachments or upgrade to Premium for more space.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('See Plans'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+    } catch (_) {
+      // Fail-open on errors to avoid blocking save unexpectedly
+    }
+
     setState(() {
       _isAutoSaving = true;
     });
@@ -490,7 +528,7 @@ class _JournalEntryCreationState extends State<JournalEntryCreation>
                         padding: EdgeInsets.all(2.w),
                         decoration: BoxDecoration(
                           color: AppTheme.lightTheme.colorScheme.primary
-                              .withValues(alpha: 0.1),
+                              .withOpacity(0.1),
                           borderRadius: BorderRadius.circular(2.w),
                         ),
                         child: CustomIconWidget(
@@ -527,7 +565,7 @@ class _JournalEntryCreationState extends State<JournalEntryCreation>
                           borderRadius: BorderRadius.circular(2.w),
                           border: Border.all(
                             color: AppTheme.lightTheme.colorScheme.outline
-                                .withValues(alpha: 0.3),
+                                .withOpacity(0.3),
                           ),
                         ),
                         child: Row(
@@ -558,7 +596,7 @@ class _JournalEntryCreationState extends State<JournalEntryCreation>
                         padding: EdgeInsets.all(2.w),
                         decoration: BoxDecoration(
                           color: AppTheme.lightTheme.colorScheme.secondary
-                              .withValues(alpha: 0.1),
+                              .withOpacity(0.1),
                           borderRadius: BorderRadius.circular(2.w),
                         ),
                         child: CustomIconWidget(
@@ -583,11 +621,11 @@ class _JournalEntryCreationState extends State<JournalEntryCreation>
                               vertical: 1.5.h,
                             ),
                             decoration: BoxDecoration(
-                              color:
-                                  _isAutoSaving
-                                      ? AppTheme.lightTheme.colorScheme.primary
-                                          .withValues(alpha: 0.7)
-                                      : AppTheme.lightTheme.colorScheme.primary,
+                color:
+                  _isAutoSaving
+                    ? AppTheme.lightTheme.colorScheme.primary
+                      .withOpacity(0.7)
+                    : AppTheme.lightTheme.colorScheme.primary,
                               borderRadius: BorderRadius.circular(2.w),
                             ),
                             child:
